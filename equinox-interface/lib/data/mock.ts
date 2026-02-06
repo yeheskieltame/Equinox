@@ -106,7 +106,7 @@ export const mockVaults: Vault[] = [
     liquidity: 220960000,
     curator: "Steakhouse",
     curatorVerified: true,
-    exposure: ["cbBTC", "WETH", "cbETH", "wstETH"],
+    exposure: ["SUI", "USDC"],
     apy: 4.21,
     utilizationRate: 50.0,
   },
@@ -118,7 +118,7 @@ export const mockVaults: Vault[] = [
     liquidity: 211730000,
     curator: "Steakhouse",
     curatorVerified: true,
-    exposure: ["WETH", "cbETH", "rETH"],
+    exposure: ["SUI", "USDC"],
     apy: 3.18,
     utilizationRate: 37.3,
   },
@@ -130,7 +130,7 @@ export const mockVaults: Vault[] = [
     liquidity: 210810000,
     curator: "Gauntlet",
     curatorVerified: true,
-    exposure: ["cbBTC", "WETH", "cbETH", "wstETH", "rETH"],
+    exposure: ["SUI", "USDC"],
     apy: 4.22,
     utilizationRate: 34.3,
   },
@@ -142,7 +142,7 @@ export const mockVaults: Vault[] = [
     liquidity: 10100000,
     curator: "Spark",
     curatorVerified: false,
-    exposure: ["WETH", "cbETH"],
+    exposure: ["SUI", "USDC"],
     apy: 3.56,
     utilizationRate: 61.4,
   },
@@ -154,7 +154,7 @@ export const mockVaults: Vault[] = [
     liquidity: 23260000,
     curator: "Seamless",
     curatorVerified: true,
-    exposure: ["cbBTC", "WETH", "cbETH", "wstETH"],
+    exposure: ["SUI", "USDC"],
     apy: 3.73,
     utilizationRate: 0.4,
   },
@@ -166,7 +166,7 @@ export const mockVaults: Vault[] = [
     liquidity: 16340000,
     curator: "Moonwell",
     curatorVerified: true,
-    exposure: ["cbBTC", "WETH", "cbETH"],
+    exposure: ["SUI", "USDC"],
     apy: 4.45,
     utilizationRate: 0.0,
   },
@@ -198,8 +198,8 @@ export const mockVestingPositions: VestingPosition[] = [
 ];
 
 export const mockMarketExposure: MarketExposure[] = [
-  { asset: "cbBTC / USDC", symbol: "cbBTC", allocation: 40, vaultAllocation: 417060000, supplyCap: 890073000, apy: 4.18, utilization: 82.28 },
   { asset: "SUI / USDC", symbol: "SUI", allocation: 60, vaultAllocation: 625880000, supplyCap: 999999999, apy: 5.21, utilization: 78.43 },
+  { asset: "USDC / SUI", symbol: "USDC", allocation: 40, vaultAllocation: 417060000, supplyCap: 890073000, apy: 4.18, utilization: 82.28 },
 ];
 
 export const mockApyHistory: ChartDataPoint[] = [
