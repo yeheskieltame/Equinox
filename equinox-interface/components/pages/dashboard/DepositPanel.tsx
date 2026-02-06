@@ -6,6 +6,8 @@ import { useAppStore } from "@/lib/store";
 import { formatNumber, formatPercentage } from "@/lib/utils/format";
 import { Info } from "lucide-react";
 
+import Image from "next/image";
+
 interface DepositPanelProps {
   asset: string;
   balance: number;
@@ -20,8 +22,13 @@ export function DepositPanel({ asset, balance, apy }: DepositPanelProps) {
     <div className="bg-[hsl(var(--card))] rounded-2xl border border-[hsl(var(--border))] p-6">
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-base font-medium text-[hsl(var(--foreground))]">Deposit {asset}</h3>
-        <div className="w-8 h-8 rounded-full bg-[hsl(var(--primary))] flex items-center justify-center">
-          <span className="text-xs font-bold text-[hsl(var(--primary-foreground))]">{asset.slice(0, 1)}</span>
+        <div className="relative w-8 h-8 rounded-full overflow-hidden">
+          <Image 
+            src={`/token/${asset.toLowerCase()}.png`} 
+            alt={asset} 
+            fill 
+            className="object-cover" 
+          />
         </div>
       </div>
 

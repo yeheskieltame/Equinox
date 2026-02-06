@@ -11,6 +11,8 @@ import {
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
+import Image from "next/image";
+
 interface VaultFiltersProps {
   onSearch: (query: string) => void;
   onDepositFilter: (value: string) => void;
@@ -23,14 +25,27 @@ export function VaultFilters({ onSearch, onDepositFilter, onCuratorFilter }: Vau
       <div className="flex items-center gap-2">
         <span className="text-sm text-[hsl(var(--muted-foreground))]">Deposit:</span>
         <Select onValueChange={onDepositFilter} defaultValue="all">
-          <SelectTrigger className="w-[100px] bg-[hsl(var(--secondary))] border-none cursor-pointer">
+          <SelectTrigger className="w-[140px] bg-[hsl(var(--secondary))] border-none cursor-pointer">
             <SelectValue placeholder="All" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All</SelectItem>
-            <SelectItem value="usdc">USDC</SelectItem>
-            <SelectItem value="sui">SUI</SelectItem>
-            <SelectItem value="weth">WETH</SelectItem>
+            <SelectItem value="usdc">
+              <div className="flex items-center gap-2">
+                <div className="relative w-5 h-5 rounded-full overflow-hidden">
+                  <Image src="/token/usdc.png" alt="USDC" fill className="object-cover" />
+                </div>
+                <span>USDC</span>
+              </div>
+            </SelectItem>
+            <SelectItem value="sui">
+              <div className="flex items-center gap-2">
+                <div className="relative w-5 h-5 rounded-full overflow-hidden">
+                  <Image src="/token/sui.png" alt="SUI" fill className="object-cover" />
+                </div>
+                <span>SUI</span>
+              </div>
+            </SelectItem>
           </SelectContent>
         </Select>
       </div>

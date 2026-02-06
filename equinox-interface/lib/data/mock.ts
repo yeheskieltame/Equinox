@@ -170,18 +170,6 @@ export const mockVaults: Vault[] = [
     apy: 4.45,
     utilizationRate: 0.0,
   },
-  {
-    id: "vault-7",
-    name: "Moonwell Flagship ETH",
-    asset: "WETH",
-    deposits: 6233020,
-    liquidity: 1717860,
-    curator: "Moonwell",
-    curatorVerified: true,
-    exposure: ["WETH", "cbETH"],
-    apy: 3.59,
-    utilizationRate: 72.4,
-  },
 ];
 
 export const mockVestingPositions: VestingPosition[] = [
@@ -210,11 +198,8 @@ export const mockVestingPositions: VestingPosition[] = [
 ];
 
 export const mockMarketExposure: MarketExposure[] = [
-  { asset: "cbBTC / USDC", symbol: "cbBTC", allocation: 56, vaultAllocation: 417060000, supplyCap: 890073000, apy: 4.18, utilization: 82.28 },
-  { asset: "WETH / USDC", symbol: "WETH", allocation: 44, vaultAllocation: 523440000, supplyCap: 188940000, apy: 3.94, utilization: 83.24 },
-  { asset: "cbETH / USDC", symbol: "cbETH", allocation: 36, vaultAllocation: 77540000, supplyCap: 71980000, apy: 4.24, utilization: 80.33 },
-  { asset: "wstETH / USDC", symbol: "wstETH", allocation: 31, vaultAllocation: 410780000, supplyCap: 49880000, apy: 4.18, utilization: 80.86 },
-  { asset: "rETH / USDC", symbol: "rETH", allocation: 27, vaultAllocation: 5184570000, supplyCap: 188940000, apy: 4.18, utilization: 88.53 },
+  { asset: "cbBTC / USDC", symbol: "cbBTC", allocation: 40, vaultAllocation: 417060000, supplyCap: 890073000, apy: 4.18, utilization: 82.28 },
+  { asset: "SUI / USDC", symbol: "SUI", allocation: 60, vaultAllocation: 625880000, supplyCap: 999999999, apy: 5.21, utilization: 78.43 },
 ];
 
 export const mockApyHistory: ChartDataPoint[] = [
@@ -251,12 +236,9 @@ export const mockUser: User = {
 export const mockPrices: PriceData[] = [
   { asset: "SUI", price: 2.45, change24h: 3.2, lastUpdated: "2026-02-05T23:30:00Z" },
   { asset: "USDC", price: 1.0, change24h: 0.0, lastUpdated: "2026-02-05T23:30:00Z" },
-  { asset: "WETH", price: 2500.0, change24h: 1.5, lastUpdated: "2026-02-05T23:30:00Z" },
-  { asset: "USDT", price: 1.0, change24h: 0.0, lastUpdated: "2026-02-05T23:30:00Z" },
 ];
 
 export const mockBorrowMarkets = [
   { asset: "USDC", available: 45200000, borrowApr: 5.2, maxLtv: 85 },
   { asset: "SUI", available: 12800000, borrowApr: 6.1, maxLtv: 75 },
-  { asset: "WETH", available: 8500000, borrowApr: 4.8, maxLtv: 80 },
 ];

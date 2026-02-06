@@ -15,6 +15,9 @@ export const metadata: Metadata = {
     description: "Order book-based DeFi lending with ZK privacy and AI fair matching on Sui",
     type: "website",
   },
+  icons: {
+    icon: "/logo/icon.ico",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

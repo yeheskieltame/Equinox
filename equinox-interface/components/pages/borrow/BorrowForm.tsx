@@ -15,6 +15,10 @@ import { AlertTriangle, ArrowRight, Shield } from "lucide-react";
 import { toast } from "sonner";
 import { formatNumber, formatPercentage } from "@/lib/utils/format";
 
+import Image from "next/image";
+
+// ... existing imports ...
+
 interface BorrowFormProps {
   onSubmit: (data: {
     collateralAsset: string;
@@ -38,6 +42,7 @@ export function BorrowForm({ onSubmit }: BorrowFormProps) {
 
   const healthFactor = ltv[0] < 50 ? "healthy" : ltv[0] < 70 ? "moderate" : "risky";
 
+  // ... handleSubmit ...
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -68,13 +73,26 @@ export function BorrowForm({ onSubmit }: BorrowFormProps) {
           </label>
           <div className="flex gap-3">
             <Select value={collateralAsset} onValueChange={setCollateralAsset}>
-              <SelectTrigger className="w-[120px] bg-[hsl(var(--secondary))] border-none cursor-pointer">
+              <SelectTrigger className="w-[140px] bg-[hsl(var(--secondary))] border-none cursor-pointer">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="SUI">SUI</SelectItem>
-                <SelectItem value="WETH">WETH</SelectItem>
-                <SelectItem value="USDC">USDC</SelectItem>
+                <SelectItem value="SUI">
+                  <div className="flex items-center gap-2">
+                    <div className="relative w-5 h-5 rounded-full overflow-hidden">
+                      <Image src="/token/sui.png" alt="SUI" fill className="object-cover" />
+                    </div>
+                    <span>SUI</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="USDC">
+                  <div className="flex items-center gap-2">
+                    <div className="relative w-5 h-5 rounded-full overflow-hidden">
+                      <Image src="/token/usdc.png" alt="USDC" fill className="object-cover" />
+                    </div>
+                    <span>USDC</span>
+                  </div>
+                </SelectItem>
               </SelectContent>
             </Select>
             <Input
@@ -102,13 +120,26 @@ export function BorrowForm({ onSubmit }: BorrowFormProps) {
           </label>
           <div className="flex gap-3">
             <Select value={borrowAsset} onValueChange={setBorrowAsset}>
-              <SelectTrigger className="w-[120px] bg-[hsl(var(--secondary))] border-none cursor-pointer">
+              <SelectTrigger className="w-[140px] bg-[hsl(var(--secondary))] border-none cursor-pointer">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="USDC">USDC</SelectItem>
-                <SelectItem value="USDT">USDT</SelectItem>
-                <SelectItem value="SUI">SUI</SelectItem>
+                <SelectItem value="USDC">
+                  <div className="flex items-center gap-2">
+                    <div className="relative w-5 h-5 rounded-full overflow-hidden">
+                      <Image src="/token/usdc.png" alt="USDC" fill className="object-cover" />
+                    </div>
+                    <span>USDC</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="SUI">
+                  <div className="flex items-center gap-2">
+                    <div className="relative w-5 h-5 rounded-full overflow-hidden">
+                      <Image src="/token/sui.png" alt="SUI" fill className="object-cover" />
+                    </div>
+                    <span>SUI</span>
+                  </div>
+                </SelectItem>
               </SelectContent>
             </Select>
             <div className="flex-1 px-4 py-2 bg-[hsl(var(--secondary))] rounded-md flex items-center">

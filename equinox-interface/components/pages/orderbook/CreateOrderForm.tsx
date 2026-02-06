@@ -15,6 +15,10 @@ import { Switch } from "@/components/ui/switch";
 import { EyeOff, Shield } from "lucide-react";
 import { toast } from "sonner";
 
+import Image from "next/image";
+
+// ... existing imports ...
+
 interface CreateOrderFormProps {
   type: "lend" | "borrow";
   onSubmit: (order: {
@@ -35,6 +39,8 @@ export function CreateOrderForm({ type, onSubmit, isSubmitting = false }: Create
   const [ltv, setLtv] = useState([70]);
   const [term, setTerm] = useState("30");
   const [isHidden, setIsHidden] = useState(false);
+
+  // ... handleSubmit ...
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,10 +73,22 @@ export function CreateOrderForm({ type, onSubmit, isSubmitting = false }: Create
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="USDC">USDC</SelectItem>
-            <SelectItem value="SUI">SUI</SelectItem>
-            <SelectItem value="WETH">WETH</SelectItem>
-            <SelectItem value="USDT">USDT</SelectItem>
+            <SelectItem value="USDC">
+              <div className="flex items-center gap-2">
+                <div className="relative w-5 h-5 rounded-full overflow-hidden">
+                  <Image src="/token/usdc.png" alt="USDC" fill className="object-cover" />
+                </div>
+                <span>USDC</span>
+              </div>
+            </SelectItem>
+            <SelectItem value="SUI">
+              <div className="flex items-center gap-2">
+                <div className="relative w-5 h-5 rounded-full overflow-hidden">
+                  <Image src="/token/sui.png" alt="SUI" fill className="object-cover" />
+                </div>
+                <span>SUI</span>
+              </div>
+            </SelectItem>
           </SelectContent>
         </Select>
       </div>

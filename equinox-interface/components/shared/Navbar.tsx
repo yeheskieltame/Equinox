@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -26,8 +27,13 @@ export function Navbar() {
         <div className="flex items-center justify-between h-14">
           <div className="flex items-center gap-6">
             <Link href="/" className="flex items-center gap-2 cursor-pointer">
-              <div className="w-7 h-7 rounded-lg bg-[hsl(var(--primary))] flex items-center justify-center">
-                <span className="text-[hsl(var(--primary-foreground))] font-bold text-sm">E</span>
+              <div className="relative w-8 h-8">
+                <Image 
+                  src="/logo/Equinox.png" 
+                  alt="Equinox" 
+                  fill
+                  className="object-contain"
+                />
               </div>
               <span className="text-base font-semibold text-[hsl(var(--foreground))]">Equinox</span>
             </Link>
