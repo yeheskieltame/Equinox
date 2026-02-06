@@ -16,6 +16,7 @@ export function DepositPanel({ asset, balance, apy }: DepositPanelProps) {
   const { user, connectWallet,isConnecting } = useAppStore();
 
   return (
+    <div className="flex flex-col gap-4 rounded-2xl">
     <div className="bg-[hsl(var(--card))] rounded-2xl border border-[hsl(var(--border))] p-6">
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-base font-medium text-[hsl(var(--foreground))]">Deposit {asset}</h3>
@@ -54,9 +55,11 @@ export function DepositPanel({ asset, balance, apy }: DepositPanelProps) {
         </div>
       </div>
 
-      {user?.isConnected ? (
+      
+    </div>
+    {user?.isConnected ? (
         <Button
-          className="w-full h-12 cursor-pointer rounded-xl bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/90 font-medium"
+          className="w-full h-12 cursor-pointer rounded-2xl bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/90 font-medium"
         >
           Deposit
         </Button>
@@ -64,11 +67,11 @@ export function DepositPanel({ asset, balance, apy }: DepositPanelProps) {
         <Button
           onClick={connectWallet}
           disabled={isConnecting}
-          className="w-full h-12 cursor-pointer rounded-xl bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/90 font-medium"
+          className="w-full h-12 cursor-pointer rounded-2xl bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/90 font-medium"
         >
           {isConnecting ? "Connecting..." : "Connect Wallet"}
         </Button>
       )}
-    </div>
+      </div>
   );
 }

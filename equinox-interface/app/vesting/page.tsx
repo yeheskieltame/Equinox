@@ -2,12 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { Navbar } from "@/components/shared";
-import { VestingDepositForm, VestingPositionCard } from "@/components/pages/vesting";
+import { VestingDepositForm, VestingPositionsTable } from "@/components/pages/vesting";
 import { useAppStore } from "@/lib/store";
 import { useWallet } from "@/components/providers";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatNumber } from "@/lib/utils/format";
-import { Lock, Sparkles, Shield, Clock, ExternalLink } from "lucide-react";
+import { Lock, Sparkles, Shield, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 import type { VestingPosition } from "@/lib/types";
 import { executeLockVesting, executeUnlockVesting } from "@/lib/sui/transaction-executor";
@@ -183,160 +183,171 @@ export default function VestingPage() {
     <div className="min-h-screen bg-[hsl(var(--background))]">
       <Navbar />
 
-      <main className="pt-24 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-[hsl(var(--foreground))] mb-2">Vesting Vault</h1>
-          <p className="text-[hsl(var(--muted-foreground))]">
-            Lock vested tokens to earn subsidy yield and get priority matching
-          </p>
-          {lastTxDigest && (
-            <a
-              href={`https://suiscan.xyz/testnet/tx/${lastTxDigest}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-sm text-[hsl(var(--primary))] hover:underline flex items-center gap-1 mt-2"
-            >
-              Last transaction: {lastTxDigest.slice(0, 16)}... <ExternalLink className="w-3 h-3" />
-            </a>
-          )}
-        </div>
+      <div className="absolute top-0 left-0 right-0 h-[400px] bg-[radial-gradient(ellipse_at_top,_hsla(220,50%,20%,0.3)_0%,_transparent_70%)] pointer-events-none" />
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <div className="bg-[hsl(var(--card))] rounded-xl border border-[hsl(var(--border))] p-5">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-[hsl(var(--primary))]/20 flex items-center justify-center">
-                <Lock className="w-5 h-5 text-[hsl(var(--primary))]" />
-              </div>
-              <span className="text-sm text-[hsl(var(--muted-foreground))]">Total Locked</span>
-            </div>
-            <p className="text-2xl font-bold text-[hsl(var(--foreground))]">
-              {formatNumber(totalLocked)} SUI
-            </p>
-          </div>
-
-          <div className="bg-[hsl(var(--card))] rounded-xl border border-[hsl(var(--border))] p-5">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-[hsl(var(--accent))]/20 flex items-center justify-center">
-                <Sparkles className="w-5 h-5 text-[hsl(var(--accent))]" />
-              </div>
-              <span className="text-sm text-[hsl(var(--muted-foreground))]">Total Earned</span>
-            </div>
-            <p className="text-2xl font-bold text-[hsl(var(--accent))]">
-              +{formatNumber(totalEarned)} SUI
-            </p>
-          </div>
-
-          <div className="bg-[hsl(var(--card))] rounded-xl border border-[hsl(var(--border))] p-5">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-[hsl(var(--success))]/20 flex items-center justify-center">
-                <Shield className="w-5 h-5 text-[hsl(var(--success))]" />
-              </div>
-              <span className="text-sm text-[hsl(var(--muted-foreground))]">Priority Status</span>
-            </div>
-            <p className={`text-2xl font-bold ${hasActiveLock ? "text-[hsl(var(--success))]" : "text-[hsl(var(--muted-foreground))]"}`}>
-              {hasActiveLock ? "Active" : "Inactive"}
-            </p>
-          </div>
-
-          <div className="bg-[hsl(var(--card))] rounded-xl border border-[hsl(var(--border))] p-5">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-[hsl(var(--warning))]/20 flex items-center justify-center">
-                <Clock className="w-5 h-5 text-[hsl(var(--warning))]" />
-              </div>
-              <span className="text-sm text-[hsl(var(--muted-foreground))]">Active Locks</span>
-            </div>
-            <p className="text-2xl font-bold text-[hsl(var(--foreground))]">
-              {activePositions.filter((p) => p.status === "locked").length}
-            </p>
-          </div>
-        </div>
-
+      <main className="relative pt-20 pb-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2">
+          {/* Main Content */}
+          <div className="lg:col-span-2 space-y-6">
+            {/* Header */}
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <h1 className="text-4xl font-semibold text-[hsl(var(--foreground))]">Vesting</h1>
+                <span className="text-4xl font-semibold text-[hsl(var(--muted-foreground))]">Vault</span>
+              </div>
+
+              <div className="flex items-center gap-3 mb-4">
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[hsl(var(--secondary))]">
+                  <Lock className="w-3.5 h-3.5 text-[hsl(var(--primary))]" />
+                  <span className="text-xs text-[hsl(var(--foreground))]">Lock to Earn</span>
+                </div>
+                <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[hsl(var(--secondary))]">
+                  <Shield className="w-3.5 h-3.5 text-[hsl(var(--success))]" />
+                  <span className="text-xs text-[hsl(var(--foreground))]">Priority Matching</span>
+                </div>
+              </div>
+
+              <p className="text-sm text-[hsl(var(--muted-foreground))] mb-8 max-w-2xl">
+                Lock your vested SUI tokens to earn subsidy yield and get priority in order matching. 
+                Longer lock durations earn higher APY rewards.
+              </p>
+
+              {lastTxDigest && (
+                <a
+                  href={`https://suiscan.xyz/testnet/tx/${lastTxDigest}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-[hsl(var(--primary))] hover:underline flex items-center gap-1 mb-4"
+                >
+                  Last transaction: {lastTxDigest.slice(0, 16)}... <ExternalLink className="w-3 h-3" />
+                </a>
+              )}
+            </div>
+
+            {/* Stats Row - Dashboard Style */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-8 py-6 border-b border-[hsl(var(--border))]">
+              <div>
+                <p className="text-sm text-[hsl(var(--muted-foreground))] mb-1">Total Locked</p>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-2xl font-semibold text-[hsl(var(--foreground))]">
+                    {formatNumber(totalLocked)}
+                  </span>
+                  <span className="text-lg text-[hsl(var(--primary))]">SUI</span>
+                </div>
+              </div>
+              <div>
+                <p className="text-sm text-[hsl(var(--muted-foreground))] mb-1">Total Earned</p>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-2xl font-semibold text-[hsl(var(--accent))]">
+                    +{formatNumber(totalEarned)}
+                  </span>
+                  <span className="text-lg text-[hsl(var(--accent))]">SUI</span>
+                </div>
+              </div>
+              <div>
+                <p className="text-sm text-[hsl(var(--muted-foreground))] mb-1">Priority Status</p>
+                <div className="flex items-baseline gap-1">
+                  <span className={`text-2xl font-semibold ${hasActiveLock ? "text-[hsl(var(--success))]" : "text-[hsl(var(--muted-foreground))]"}`}>
+                    {hasActiveLock ? "Active" : "Inactive"}
+                  </span>
+                </div>
+              </div>
+              <div>
+                <p className="text-sm text-[hsl(var(--muted-foreground))] mb-1">Active Locks</p>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-2xl font-semibold text-[hsl(var(--foreground))]">
+                    {activePositions.filter((p) => p.status === "locked").length}
+                  </span>
+                  <span className="text-lg text-[hsl(var(--muted-foreground))]">positions</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Tabs with Positions Table */}
             <Tabs defaultValue="positions" className="w-full">
-              <TabsList className="mb-6 bg-[hsl(var(--secondary))]">
-                <TabsTrigger value="positions" className="cursor-pointer">Your Positions</TabsTrigger>
-                <TabsTrigger value="history" className="cursor-pointer">History</TabsTrigger>
+              <TabsList className="bg-transparent border-b border-[hsl(var(--border))] rounded-none p-0 h-auto">
+                <TabsTrigger
+                  value="positions"
+                  className="cursor-pointer rounded-none border-b-2 border-transparent data-[state=active]:border-[hsl(var(--foreground))] data-[state=active]:bg-transparent px-4 py-3 text-sm"
+                >
+                  Active Positions
+                </TabsTrigger>
+                <TabsTrigger
+                  value="history"
+                  className="cursor-pointer rounded-none border-b-2 border-transparent data-[state=active]:border-[hsl(var(--foreground))] data-[state=active]:bg-transparent px-4 py-3 text-sm"
+                >
+                  History
+                </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="positions">
+              <TabsContent value="positions" className="mt-6">
                 {isLoadingVesting ? (
-                  <div className="bg-[hsl(var(--card))] rounded-xl border border-[hsl(var(--border))] p-12 flex items-center justify-center">
+                  <div className="bg-[hsl(var(--card))] rounded-2xl border border-[hsl(var(--border))] p-12 flex items-center justify-center">
                     <div className="animate-pulse text-[hsl(var(--muted-foreground))]">Loading positions...</div>
                   </div>
-                ) : activePositions.length === 0 ? (
-                  <div className="bg-[hsl(var(--card))] rounded-xl border border-[hsl(var(--border))] p-12 text-center">
-                    <p className="text-[hsl(var(--muted-foreground))] mb-4">
-                      You have no locked vesting positions
-                    </p>
-                    <p className="text-sm text-[hsl(var(--muted-foreground))]">
-                      Lock your vested SUI to earn subsidy yield
-                    </p>
-                  </div>
                 ) : (
-                  <div className="space-y-4">
-                    {activePositions.map((position) => (
-                      <VestingPositionCard
-                        key={position.id}
-                        position={position}
-                        onUnlock={position.status === "unlockable" ? handleUnlock : undefined}
-                        isSubmitting={isSubmitting}
-                      />
-                    ))}
-                  </div>
+                  <VestingPositionsTable
+                    positions={activePositions}
+                    title="Your Positions"
+                    onUnlock={handleUnlock}
+                    isSubmitting={isSubmitting}
+                    emptyMessage="You have no locked vesting positions. Lock your vested SUI to earn subsidy yield."
+                  />
                 )}
               </TabsContent>
 
-              <TabsContent value="history">
-                {unlockedPositions.length === 0 ? (
-                  <div className="bg-[hsl(var(--card))] rounded-xl border border-[hsl(var(--border))] p-8 text-center">
-                    <p className="text-[hsl(var(--muted-foreground))]">No unlock history yet</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {unlockedPositions.map((position) => (
-                      <VestingPositionCard key={position.id} position={position} />
-                    ))}
-                  </div>
-                )}
+              <TabsContent value="history" className="mt-6">
+                <VestingPositionsTable
+                  positions={unlockedPositions}
+                  title="Unlock History"
+                  emptyMessage="No unlock history yet"
+                />
               </TabsContent>
             </Tabs>
           </div>
 
-          <div>
+          {/* Sidebar - Deposit Panel */}
+          <div className="lg:sticky lg:top-20 lg:self-start space-y-4">
             <VestingDepositForm onSubmit={handleDeposit} isSubmitting={isSubmitting} />
-          </div>
-        </div>
 
-        <div className="mt-8 p-6 bg-[hsl(var(--card))] rounded-xl border border-[hsl(var(--border))]">
-          <h3 className="text-lg font-semibold text-[hsl(var(--foreground))] mb-4">Benefits of Vesting Vault</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <Sparkles className="w-5 h-5 text-[hsl(var(--accent))]" />
-                <h4 className="font-medium text-[hsl(var(--foreground))]">Subsidy Yield</h4>
+            {/* Benefits Card */}
+            <div className="bg-[hsl(var(--card))] rounded-2xl border border-[hsl(var(--border))] p-5">
+              <h4 className="text-sm font-medium text-[hsl(var(--foreground))] mb-4">Vault Benefits</h4>
+              <div className="space-y-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-[hsl(var(--accent))]/20 flex items-center justify-center shrink-0">
+                    <Sparkles className="w-4 h-4 text-[hsl(var(--accent))]" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-[hsl(var(--foreground))]">Subsidy Yield</p>
+                    <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                      Earn up to 3.5% extra APY on locked tokens
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-[hsl(var(--success))]/20 flex items-center justify-center shrink-0">
+                    <Shield className="w-4 h-4 text-[hsl(var(--success))]" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-[hsl(var(--foreground))]">Priority Matching</p>
+                    <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                      Get matched first with better rates
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-[hsl(var(--primary))]/20 flex items-center justify-center shrink-0">
+                    <Lock className="w-4 h-4 text-[hsl(var(--primary))]" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-[hsl(var(--foreground))]">Ecosystem Stability</p>
+                    <p className="text-xs text-[hsl(var(--muted-foreground))]">
+                      Reduce sell pressure on SUI
+                    </p>
+                  </div>
+                </div>
               </div>
-              <p className="text-sm text-[hsl(var(--muted-foreground))]">
-                Earn additional APY on top of base lending yield by locking vested tokens
-              </p>
-            </div>
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <Shield className="w-5 h-5 text-[hsl(var(--success))]" />
-                <h4 className="font-medium text-[hsl(var(--foreground))]">Priority Matching</h4>
-              </div>
-              <p className="text-sm text-[hsl(var(--muted-foreground))]">
-                Get priority in order matching for better rates and faster execution
-              </p>
-            </div>
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <Lock className="w-5 h-5 text-[hsl(var(--primary))]" />
-                <h4 className="font-medium text-[hsl(var(--foreground))]">Ecosystem Stability</h4>
-              </div>
-              <p className="text-sm text-[hsl(var(--muted-foreground))]">
-                Reduce sell pressure and contribute to Sui ecosystem stability
-              </p>
             </div>
           </div>
         </div>
