@@ -179,13 +179,25 @@ export default function OrderbookPage() {
       }
 
       toast.dismiss();
-      toast.info("Match found! Executing...");
+      toast.info("Match found! Computing AI fairness via Nautilus...");
+
+      // Check if borrower has vested positions for priority matching
+      const isVested = vestingPositions.some(vp => vp.status === "locked" || vp.status === "unlockable");
 
       const result = await executeMatchOrders(
         match.lend.id,
         match.borrow.id,
         match.lend.asset,
-        address
+        address,
+        {
+          lendAmount: match.lend.amount,
+          borrowAmount: match.borrow.amount,
+          lendRate: match.lend.interestRate,
+          borrowRate: match.borrow.interestRate,
+          lenderAddress: match.lend.creator || address,
+          borrowerAddress: match.borrow.creator || address,
+          isVested,
+        }
       );
 
       if (result.success) {
@@ -193,6 +205,12 @@ export default function OrderbookPage() {
         toast.success(
           <div className="flex flex-col gap-1">
             <span>Orders matched successfully!</span>
+            {result.fairnessScore !== undefined && (
+              <span className="text-xs text-emerald-400">
+                🤖 Nautilus AI Fairness: {result.fairnessScore}/100 
+                {result.finalRate !== undefined && ` • Rate: ${result.finalRate.toFixed(2)}%`}
+              </span>
+            )}
             {result.digest && (
               <a
                 href={isMockMode() ? "#" : `https://suiscan.xyz/testnet/tx/${result.digest}`}
@@ -208,7 +226,23 @@ export default function OrderbookPage() {
         // Wait a bit for indexing then refresh
         setTimeout(() => fetchOrders(), 2000);
       } else {
-        toast.error(`Match failed: ${result.error}`);
+        // Show fairness score even if matching failed (for demo)
+        if (result.fairnessScore !== undefined) {
+          toast.info(
+            <div className="flex flex-col gap-1">
+              <span className="text-amber-400">Match computed but not executed on-chain</span>
+              <span className="text-xs">
+                🤖 Fairness Score: {result.fairnessScore}/100
+                {result.finalRate !== undefined && ` • Computed Rate: ${result.finalRate.toFixed(2)}%`}
+              </span>
+              <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                {result.error}
+              </span>
+            </div>
+          );
+        } else {
+          toast.error(`Match failed: ${result.error}`);
+        }
       }
     } catch (error) {
       console.error("Match error:", error);
