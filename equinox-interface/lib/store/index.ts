@@ -134,7 +134,18 @@ export const useAppStore = create<AppState>((set, get) => ({
         isConnecting: false,
       });
     } else {
+      // In real mode, wallet connection is handled by SuiProvider
+      // After connection, we need to fetch data
       set({ isConnecting: false });
+      
+      // Trigger data fetching - the actual wallet state comes from useWallet hook
+      const { fetchOrders, fetchPositions, fetchVestingPositions, fetchMarketData } = get();
+      await Promise.all([
+        fetchOrders(),
+        fetchPositions(),
+        fetchVestingPositions(),
+        fetchMarketData(),
+      ]);
     }
   },
 

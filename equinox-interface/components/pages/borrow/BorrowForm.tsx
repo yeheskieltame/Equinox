@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
@@ -11,71 +11,108 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { AlertTriangle, ArrowRight, Shield } from "lucide-react";
-import { toast } from "sonner";
+import { AlertTriangle, ArrowRight, Shield, Loader2 } from "lucide-react";
 import { formatNumber, formatPercentage } from "@/lib/utils/format";
-
 import Image from "next/image";
+import { useWallet } from "@/components/providers";
+import { fetchUserCoins, fetchBlockchainPrices } from "@/lib/sui/blockchain-service";
+import type { PriceData } from "@/lib/types";
 
-// Asset configuration for multi-collateral support
+// Asset configuration for multi-collateral support (from Blueprint)
 const ASSET_CONFIG = {
-  SUI: { price: 2.45, maxLtv: 75, liquidationThreshold: 85, decimals: 9 },
-  USDC: { price: 1.0, maxLtv: 90, liquidationThreshold: 95, decimals: 6 },
-  ETH: { price: 2850.0, maxLtv: 70, liquidationThreshold: 80, decimals: 8 },
+  SUI: { maxLtv: 75, liquidationThreshold: 85, decimals: 9, logo: "/token/sui.png" },
+  USDC: { maxLtv: 90, liquidationThreshold: 95, decimals: 6, logo: "/token/usdc.png" },
+  ETH: { maxLtv: 70, liquidationThreshold: 80, decimals: 8, logo: "/token/eth.png" },
 };
+
+type AssetType = keyof typeof ASSET_CONFIG;
 
 interface BorrowFormProps {
   onSubmit: (data: {
     collateralAsset: string;
     collateralAmount: number;
+    collateralCoinId: string;
     borrowAsset: string;
     borrowAmount: number;
     ltv: number;
   }) => void;
+  isSubmitting?: boolean;
 }
 
-export function BorrowForm({ onSubmit }: BorrowFormProps) {
-  const [collateralAsset, setCollateralAsset] = useState("SUI");
+export function BorrowForm({ onSubmit, isSubmitting = false }: BorrowFormProps) {
+  const { address, isConnected } = useWallet();
+  const [collateralAsset, setCollateralAsset] = useState<AssetType>("SUI");
   const [collateralAmount, setCollateralAmount] = useState("");
-  const [borrowAsset, setBorrowAsset] = useState("USDC");
+  const [borrowAsset, setBorrowAsset] = useState<AssetType>("USDC");
   const [ltv, setLtv] = useState([65]);
+  const [prices, setPrices] = useState<PriceData[]>([]);
+  const [userCoins, setUserCoins] = useState<{ objectId: string; balance: number }[]>([]);
+  const [isLoadingCoins, setIsLoadingCoins] = useState(false);
 
-  const collateralConfig = ASSET_CONFIG[collateralAsset as keyof typeof ASSET_CONFIG];
-  const collateralPrice = collateralConfig?.price || 1;
+  // Fetch prices on mount
+  useEffect(() => {
+    fetchBlockchainPrices().then(setPrices);
+  }, []);
+
+  // Fetch user coins when connected and collateral asset changes
+  useEffect(() => {
+    if (isConnected && address) {
+      setIsLoadingCoins(true);
+      fetchUserCoins(address).then((coins) => {
+        setUserCoins(coins);
+        setIsLoadingCoins(false);
+      });
+    }
+  }, [isConnected, address, collateralAsset]);
+
+  const getPrice = (asset: string) => {
+    const priceData = prices.find(p => p.asset === asset);
+    return priceData?.price || 0;
+  };
+
+  const collateralConfig = ASSET_CONFIG[collateralAsset];
+  const collateralPrice = getPrice(collateralAsset);
   const maxLtvForAsset = collateralConfig?.maxLtv || 75;
   const collateralValue = parseFloat(collateralAmount || "0") * collateralPrice;
   const maxBorrow = collateralValue * (ltv[0] / 100);
   const liquidationPrice = maxBorrow / (parseFloat(collateralAmount || "1") * (collateralConfig?.liquidationThreshold / 100 || 0.8));
 
   const healthFactor = ltv[0] < 50 ? "healthy" : ltv[0] < 70 ? "moderate" : "risky";
+  const totalBalance = userCoins.reduce((acc, coin) => acc + coin.balance, 0);
 
   const handleCollateralChange = (asset: string) => {
-    setCollateralAsset(asset);
+    setCollateralAsset(asset as AssetType);
     // Reset LTV if it exceeds max for new asset
-    const newMaxLtv = ASSET_CONFIG[asset as keyof typeof ASSET_CONFIG]?.maxLtv || 75;
+    const newMaxLtv = ASSET_CONFIG[asset as AssetType]?.maxLtv || 75;
     if (ltv[0] > newMaxLtv) {
       setLtv([newMaxLtv - 10]);
     }
   };
 
-  // ... handleSubmit ...
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!collateralAmount || parseFloat(collateralAmount) <= 0) {
-      toast.error("Please enter a valid collateral amount");
       return;
     }
 
+    // Find the first coin with sufficient balance
+    const selectedCoin = userCoins.find(coin => coin.balance >= parseFloat(collateralAmount));
+    
     onSubmit({
       collateralAsset,
       collateralAmount: parseFloat(collateralAmount),
+      collateralCoinId: selectedCoin?.objectId || "",
       borrowAsset,
       borrowAmount: maxBorrow,
       ltv: ltv[0],
     });
+  };
 
-    toast.success("Borrow position created successfully");
+  const handleMaxClick = () => {
+    if (totalBalance > 0) {
+      setCollateralAmount(totalBalance.toString());
+    }
   };
 
   return (
@@ -84,48 +121,52 @@ export function BorrowForm({ onSubmit }: BorrowFormProps) {
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
-          <label className="block text-sm font-medium text-[hsl(var(--foreground))] mb-2">
-            Collateral
-          </label>
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-sm font-medium text-[hsl(var(--foreground))]">
+              Collateral
+            </label>
+            {isConnected && (
+              <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                Balance: {isLoadingCoins ? "..." : formatNumber(totalBalance)} {collateralAsset}
+              </span>
+            )}
+          </div>
           <div className="flex gap-3">
             <Select value={collateralAsset} onValueChange={handleCollateralChange}>
               <SelectTrigger className="w-[140px] bg-[hsl(var(--secondary))] border-none cursor-pointer">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="SUI">
-                  <div className="flex items-center gap-2">
-                    <div className="relative w-5 h-5 rounded-full overflow-hidden">
-                      <Image src="/token/sui.png" alt="SUI" fill className="object-cover" />
+                {(Object.keys(ASSET_CONFIG) as AssetType[]).map((asset) => (
+                  <SelectItem key={asset} value={asset}>
+                    <div className="flex items-center gap-2">
+                      <div className="relative w-5 h-5 rounded-full overflow-hidden">
+                        <Image src={ASSET_CONFIG[asset].logo} alt={asset} fill sizes="20px" className="object-cover" />
+                      </div>
+                      <span>{asset}</span>
                     </div>
-                    <span>SUI</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="ETH">
-                  <div className="flex items-center gap-2">
-                    <div className="relative w-5 h-5 rounded-full overflow-hidden">
-                      <Image src="/token/eth.png" alt="ETH" fill className="object-cover" />
-                    </div>
-                    <span>ETH</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="USDC">
-                  <div className="flex items-center gap-2">
-                    <div className="relative w-5 h-5 rounded-full overflow-hidden">
-                      <Image src="/token/usdc.png" alt="USDC" fill className="object-cover" />
-                    </div>
-                    <span>USDC</span>
-                  </div>
-                </SelectItem>
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
-            <Input
-              type="number"
-              value={collateralAmount}
-              onChange={(e) => setCollateralAmount(e.target.value)}
-              placeholder="0.00"
-              className="flex-1 bg-[hsl(var(--secondary))] border-none"
-            />
+            <div className="flex-1 relative">
+              <Input
+                type="number"
+                value={collateralAmount}
+                onChange={(e) => setCollateralAmount(e.target.value)}
+                placeholder="0.00"
+                className="bg-[hsl(var(--secondary))] border-none pr-16"
+              />
+              {isConnected && totalBalance > 0 && (
+                <button
+                  type="button"
+                  onClick={handleMaxClick}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[hsl(var(--primary))] hover:underline cursor-pointer"
+                >
+                  MAX
+                </button>
+              )}
+            </div>
           </div>
           <p className="text-sm text-[hsl(var(--muted-foreground))] mt-2">
             Value: ${formatNumber(collateralValue)}
@@ -143,35 +184,21 @@ export function BorrowForm({ onSubmit }: BorrowFormProps) {
             Borrow
           </label>
           <div className="flex gap-3">
-            <Select value={borrowAsset} onValueChange={setBorrowAsset}>
+            <Select value={borrowAsset} onValueChange={(v) => setBorrowAsset(v as AssetType)}>
               <SelectTrigger className="w-[140px] bg-[hsl(var(--secondary))] border-none cursor-pointer">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="USDC">
-                  <div className="flex items-center gap-2">
-                    <div className="relative w-5 h-5 rounded-full overflow-hidden">
-                      <Image src="/token/usdc.png" alt="USDC" fill className="object-cover" />
+                {(Object.keys(ASSET_CONFIG) as AssetType[]).map((asset) => (
+                  <SelectItem key={asset} value={asset}>
+                    <div className="flex items-center gap-2">
+                      <div className="relative w-5 h-5 rounded-full overflow-hidden">
+                        <Image src={ASSET_CONFIG[asset].logo} alt={asset} fill sizes="20px" className="object-cover" />
+                      </div>
+                      <span>{asset}</span>
                     </div>
-                    <span>USDC</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="SUI">
-                  <div className="flex items-center gap-2">
-                    <div className="relative w-5 h-5 rounded-full overflow-hidden">
-                      <Image src="/token/sui.png" alt="SUI" fill className="object-cover" />
-                    </div>
-                    <span>SUI</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="ETH">
-                  <div className="flex items-center gap-2">
-                    <div className="relative w-5 h-5 rounded-full overflow-hidden">
-                      <Image src="/token/eth.png" alt="ETH" fill className="object-cover" />
-                    </div>
-                    <span>ETH</span>
-                  </div>
-                </SelectItem>
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
             <div className="flex-1 px-4 py-2 bg-[hsl(var(--secondary))] rounded-md flex items-center">
@@ -201,7 +228,7 @@ export function BorrowForm({ onSubmit }: BorrowFormProps) {
             value={ltv}
             onValueChange={setLtv}
             min={20}
-            max={85}
+            max={maxLtvForAsset}
             step={5}
             className="cursor-pointer"
           />
@@ -220,9 +247,9 @@ export function BorrowForm({ onSubmit }: BorrowFormProps) {
             </span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-sm text-[hsl(var(--muted-foreground))]">Borrow APR</span>
-            <span className="text-sm font-medium text-[hsl(var(--warning))]">
-              5.2%
+            <span className="text-sm text-[hsl(var(--muted-foreground))]">Max LTV ({collateralAsset})</span>
+            <span className="text-sm font-medium text-[hsl(var(--foreground))]">
+              {maxLtvForAsset}%
             </span>
           </div>
           <div className="flex items-center justify-between">
@@ -257,9 +284,19 @@ export function BorrowForm({ onSubmit }: BorrowFormProps) {
 
         <Button
           type="submit"
-          className="w-full cursor-pointer bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/90"
+          disabled={isSubmitting || !isConnected || !collateralAmount || parseFloat(collateralAmount) <= 0}
+          className="w-full cursor-pointer bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/90 disabled:opacity-50"
         >
-          Create Borrow Position
+          {isSubmitting ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Creating Position...
+            </>
+          ) : !isConnected ? (
+            "Connect Wallet"
+          ) : (
+            "Create Borrow Position"
+          )}
         </Button>
       </form>
     </div>

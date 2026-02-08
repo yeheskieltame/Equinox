@@ -100,6 +100,15 @@ export default function EarnPage() {
               <div className="bg-[hsl(var(--card))] rounded-xl border border-[hsl(var(--border))] p-12 flex items-center justify-center">
                 <div className="animate-pulse text-[hsl(var(--muted-foreground))]">Loading vaults...</div>
               </div>
+            ) : filteredVaults.length === 0 ? (
+              <div className="bg-[hsl(var(--card))] rounded-xl border border-[hsl(var(--border))] p-12 text-center">
+                <p className="text-[hsl(var(--muted-foreground))] mb-2">
+                  No vaults available yet
+                </p>
+                <p className="text-sm text-[hsl(var(--muted-foreground))]">
+                  Vaults will be created when lenders deposit assets into the protocol
+                </p>
+              </div>
             ) : (
               <VaultTable vaults={filteredVaults} />
             )}

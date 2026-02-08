@@ -32,6 +32,7 @@ export function Navbar() {
                   src="/logo/Equinox.png" 
                   alt="Equinox" 
                   fill
+                  sizes="32px"
                   className="object-contain"
                 />
               </div>

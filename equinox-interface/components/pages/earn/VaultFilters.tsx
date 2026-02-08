@@ -33,7 +33,7 @@ export function VaultFilters({ onSearch, onDepositFilter, onCuratorFilter }: Vau
             <SelectItem value="usdc">
               <div className="flex items-center gap-2">
                 <div className="relative w-5 h-5 rounded-full overflow-hidden">
-                  <Image src="/token/usdc.png" alt="USDC" fill className="object-cover" />
+                  <Image src="/token/usdc.png" alt="USDC" fill sizes="20px" className="object-cover" />
                 </div>
                 <span>USDC</span>
               </div>
@@ -41,7 +41,7 @@ export function VaultFilters({ onSearch, onDepositFilter, onCuratorFilter }: Vau
             <SelectItem value="sui">
               <div className="flex items-center gap-2">
                 <div className="relative w-5 h-5 rounded-full overflow-hidden">
-                  <Image src="/token/sui.png" alt="SUI" fill className="object-cover" />
+                  <Image src="/token/sui.png" alt="SUI" fill sizes="20px" className="object-cover" />
                 </div>
                 <span>SUI</span>
               </div>

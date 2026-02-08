@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Slider } from "@/components/ui/slider";
 import {
   Select,
   SelectContent,
@@ -11,9 +10,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Lock, Shield, Sparkles } from "lucide-react";
-import { toast } from "sonner";
+import { Lock, Shield, Sparkles, Loader2 } from "lucide-react";
 import { formatNumber, formatPercentage } from "@/lib/utils/format";
+import { useWallet } from "@/components/providers";
+import { fetchUserCoins, getCoinType } from "@/lib/sui/blockchain-service";
 
 interface VestingDepositFormProps {
   onSubmit: (data: {
@@ -24,11 +24,27 @@ interface VestingDepositFormProps {
 }
 
 export function VestingDepositForm({ onSubmit, isSubmitting = false }: VestingDepositFormProps) {
+  const { address, isConnected } = useWallet();
   const [amount, setAmount] = useState("");
   const [lockDuration, setLockDuration] = useState("90");
+  const [suiBalance, setSuiBalance] = useState(0);
+  const [isLoadingBalance, setIsLoadingBalance] = useState(false);
 
-  const vestingBalance = 500000;
-  const subsidyRate = parseInt(lockDuration) >= 180 ? 2.5 : parseInt(lockDuration) >= 90 ? 1.5 : 0.5;
+  // Fetch user's SUI balance when connected
+  useEffect(() => {
+    if (isConnected && address) {
+      setIsLoadingBalance(true);
+      fetchUserCoins(address, getCoinType("SUI")).then((coins) => {
+        const total = coins.reduce((acc, coin) => acc + coin.balance, 0);
+        setSuiBalance(total);
+        setIsLoadingBalance(false);
+      });
+    } else {
+      setSuiBalance(0);
+    }
+  }, [isConnected, address]);
+
+  const subsidyRate = parseInt(lockDuration) >= 365 ? 3.5 : parseInt(lockDuration) >= 180 ? 2.5 : parseInt(lockDuration) >= 90 ? 1.5 : 0.5;
   const baseApy = 4.5;
   const totalApy = baseApy + subsidyRate;
   const projectedEarnings = parseFloat(amount || "0") * (totalApy / 100) * (parseInt(lockDuration) / 365);
@@ -37,12 +53,10 @@ export function VestingDepositForm({ onSubmit, isSubmitting = false }: VestingDe
     e.preventDefault();
     
     if (!amount || parseFloat(amount) <= 0) {
-      toast.error("Please enter a valid amount");
       return;
     }
 
-    if (parseFloat(amount) > vestingBalance) {
-      toast.error("Amount exceeds your vesting balance");
+    if (parseFloat(amount) > suiBalance) {
       return;
     }
 
@@ -50,9 +64,15 @@ export function VestingDepositForm({ onSubmit, isSubmitting = false }: VestingDe
       amount: parseFloat(amount),
       lockDuration: parseInt(lockDuration),
     });
-
-    toast.success("Vested tokens locked successfully");
   };
+
+  const handleMaxClick = () => {
+    if (suiBalance > 0) {
+      setAmount(suiBalance.toString());
+    }
+  };
+
+  const isValidAmount = parseFloat(amount || "0") > 0 && parseFloat(amount || "0") <= suiBalance;
 
   return (
     <div className="bg-[hsl(var(--card))] rounded-xl border border-[hsl(var(--border))] p-6">
@@ -63,16 +83,16 @@ export function VestingDepositForm({ onSubmit, isSubmitting = false }: VestingDe
         <div>
           <h3 className="text-lg font-semibold text-[hsl(var(--foreground))]">Lock Vested Tokens</h3>
           <p className="text-sm text-[hsl(var(--muted-foreground))]">
-            Earn subsidy yield by locking your vested SUI
+            Earn subsidy yield by locking your SUI
           </p>
         </div>
       </div>
 
       <div className="p-4 bg-[hsl(var(--secondary))] rounded-xl mb-6">
         <div className="flex items-center justify-between">
-          <span className="text-sm text-[hsl(var(--muted-foreground))]">Available Vesting Balance</span>
+          <span className="text-sm text-[hsl(var(--muted-foreground))]">Available SUI Balance</span>
           <span className="text-lg font-semibold text-[hsl(var(--foreground))]">
-            {formatNumber(vestingBalance)} SUI
+            {isLoadingBalance ? "..." : formatNumber(suiBalance)} SUI
           </span>
         </div>
       </div>
@@ -90,14 +110,21 @@ export function VestingDepositForm({ onSubmit, isSubmitting = false }: VestingDe
               placeholder="0.00"
               className="pr-16 bg-[hsl(var(--secondary))] border-none"
             />
-            <button
-              type="button"
-              onClick={() => setAmount(vestingBalance.toString())}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-[hsl(var(--primary))] cursor-pointer hover:underline"
-            >
-              MAX
-            </button>
+            {isConnected && suiBalance > 0 && (
+              <button
+                type="button"
+                onClick={handleMaxClick}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-[hsl(var(--primary))] cursor-pointer hover:underline"
+              >
+                MAX
+              </button>
+            )}
           </div>
+          {parseFloat(amount || "0") > suiBalance && suiBalance > 0 && (
+            <p className="text-xs text-[hsl(var(--destructive))] mt-1">
+              Amount exceeds your balance
+            </p>
+          )}
         </div>
 
         <div>
@@ -143,7 +170,7 @@ export function VestingDepositForm({ onSubmit, isSubmitting = false }: VestingDe
           </div>
         </div>
 
-        {parseFloat(amount || "0") > 0 && (
+        {parseFloat(amount || "0") > 0 && isValidAmount && (
           <div className="p-4 bg-[hsl(var(--primary))]/10 rounded-xl">
             <div className="flex items-center justify-between">
               <span className="text-sm text-[hsl(var(--muted-foreground))]">Projected Earnings</span>
@@ -163,10 +190,19 @@ export function VestingDepositForm({ onSubmit, isSubmitting = false }: VestingDe
 
         <Button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isSubmitting || !isConnected || !isValidAmount}
           className="w-full cursor-pointer bg-[hsl(var(--accent))] text-[hsl(var(--accent-foreground))] hover:bg-[hsl(var(--accent))]/90 disabled:opacity-50"
         >
-          {isSubmitting ? "Locking..." : "Lock Vested Tokens"}
+          {isSubmitting ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Locking...
+            </>
+          ) : !isConnected ? (
+            "Connect Wallet"
+          ) : (
+            "Lock Vested Tokens"
+          )}
         </Button>
       </form>
     </div>

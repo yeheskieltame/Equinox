@@ -5,6 +5,10 @@ export interface EnvConfig {
   sui: {
     network: "mainnet" | "testnet" | "devnet";
     rpcUrl: string;
+    packageId: string;
+    registryId: string;
+    vestingVaultId: string;
+    // Legacy aliases
     orderbookPackageId: string;
     loanObjectPackageId: string;
     vestingVaultPackageId: string;
@@ -26,9 +30,13 @@ export const env: EnvConfig = {
   sui: {
     network: (process.env.NEXT_PUBLIC_SUI_NETWORK as "mainnet" | "testnet" | "devnet") || "testnet",
     rpcUrl: process.env.NEXT_PUBLIC_SUI_RPC_URL || "https://fullnode.testnet.sui.io:443",
-    orderbookPackageId: process.env.NEXT_PUBLIC_ORDERBOOK_PACKAGE_ID || "",
-    loanObjectPackageId: process.env.NEXT_PUBLIC_LOAN_OBJECT_PACKAGE_ID || "",
-    vestingVaultPackageId: process.env.NEXT_PUBLIC_VESTING_VAULT_PACKAGE_ID || "",
+    packageId: process.env.NEXT_PUBLIC_PACKAGE_ID || "",
+    registryId: process.env.NEXT_PUBLIC_REGISTRY_ID || "",
+    vestingVaultId: process.env.NEXT_PUBLIC_VESTING_VAULT_ID || "",
+    // Legacy aliases for backward compatibility
+    orderbookPackageId: process.env.NEXT_PUBLIC_ORDERBOOK_PACKAGE_ID || process.env.NEXT_PUBLIC_PACKAGE_ID || "",
+    loanObjectPackageId: process.env.NEXT_PUBLIC_LOAN_OBJECT_PACKAGE_ID || process.env.NEXT_PUBLIC_PACKAGE_ID || "",
+    vestingVaultPackageId: process.env.NEXT_PUBLIC_VESTING_VAULT_PACKAGE_ID || process.env.NEXT_PUBLIC_PACKAGE_ID || "",
   },
   zkLogin: {
     googleClientId: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "",
@@ -44,3 +52,12 @@ export const env: EnvConfig = {
 
 export const isMockMode = (): boolean => env.appMode === "mock";
 export const isRealMode = (): boolean => env.appMode === "real";
+
+// Contract module paths
+export const MODULES = {
+  REGISTRY: `${env.sui.packageId}::registry`,
+  MARKET: `${env.sui.packageId}::market`,
+  LOAN: `${env.sui.packageId}::loan`,
+  VESTING: `${env.sui.packageId}::vesting`,
+  MOCK_COINS: `${env.sui.packageId}::mock_coins`,
+} as const;

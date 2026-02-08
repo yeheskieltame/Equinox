@@ -1,1 +1,1 @@
-export { env, isMockMode, isRealMode, type EnvConfig, type AppMode } from "./env";
+export { env, isMockMode, isRealMode, MODULES, type EnvConfig, type AppMode } from "./env";
