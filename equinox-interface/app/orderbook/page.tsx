@@ -65,6 +65,8 @@ export default function OrderbookPage() {
     isHidden: boolean;
     coinObjectId?: string;
     collateralAmount?: number;
+    collateral?: string;
+    collateralCoinId?: string;
     collaterals?: { asset: string; amount: number }[];
   }) => {
     if (!isConnected || !address) {

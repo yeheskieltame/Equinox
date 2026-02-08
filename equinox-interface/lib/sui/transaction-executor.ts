@@ -81,6 +81,8 @@ export async function executeCreateOrder(
     isHidden: boolean;
     coinObjectId?: string;
     collateralAmount?: number;
+    collateral?: string; // Primary collateral asset (e.g., "ETH", "SUI", "USDC")
+    collateralCoinId?: string; // Coin object ID for non-SUI collateral
     collaterals?: { asset: string; amount: number }[];
   },
   userAddress: string
@@ -109,7 +111,12 @@ export async function executeCreateOrder(
   }
 
   try {
-    const tx = buildCreateOrderTx(params);
+    // Build transaction with collateral parameter for proper market routing
+    const tx = buildCreateOrderTx({
+      ...params,
+      collateral: params.collateral, // Pass collateral for market selection
+      collateralCoinId: params.collateralCoinId, // Pass coin object ID for non-SUI collateral
+    });
     return await executeTransaction(tx, userAddress);
   } catch (error) {
     return {

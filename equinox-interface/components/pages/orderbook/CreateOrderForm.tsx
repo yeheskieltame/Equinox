@@ -29,6 +29,8 @@ interface CreateOrderFormProps {
     isHidden: boolean;
     coinObjectId?: string;
     collateralAmount?: number;
+    collateral?: string; // Primary collateral asset for the transaction
+    collateralCoinId?: string; // Coin object ID for non-SUI collateral
     collaterals?: { asset: string; amount: number }[];
   }) => void;
   isSubmitting?: boolean;
@@ -56,9 +58,13 @@ export function CreateOrderForm({ type, onSubmit, isSubmitting = false }: Create
     USDC: 0,
   });
   const [coinObjectId, setCoinObjectId] = useState<string | undefined>(undefined);
-
-  // Constants for MVP
-  const COLLATERAL_ASSET = "SUI"; 
+  
+  // Collateral coin object IDs for non-SUI collateral
+  const [collateralCoinIds, setCollateralCoinIds] = useState<{ [key: string]: string | undefined }>({
+    SUI: undefined, // Not needed, split from gas
+    ETH: undefined,
+    USDC: undefined,
+  }); 
 
   const suiClient = useSuiClient();
   const account = useCurrentAccount();
@@ -81,32 +87,50 @@ export function CreateOrderForm({ type, onSubmit, isSubmitting = false }: Create
           setAssetBalance(total);
         }
 
-        // 2. Fetch All Balances
+        // 2. Fetch All Balances and Coin Object IDs
         const suiBal = await suiClient.getBalance({ owner: account.address, coinType: "0x2::sui::SUI" });
         const newBalances = { ...balances };
+        const newCoinIds: { [key: string]: string | undefined } = { SUI: undefined, ETH: undefined, USDC: undefined };
+        
         newBalances.SUI = Number(suiBal.totalBalance) / 1_000_000_000;
         
-        // Fetch USDC
+        // Fetch USDC and its coin object ID
         try {
             const usdcCoins = await suiClient.getCoins({ owner: account.address, coinType: getCoinType("USDC") });
             newBalances.USDC = usdcCoins.data.reduce((acc, c) => acc + (Number(c.balance) / 1_000_000), 0);
+            // Get the coin with highest balance
+            let maxBal = 0;
+            for (const coin of usdcCoins.data) {
+              const bal = Number(coin.balance) / 1_000_000;
+              if (bal > maxBal) {
+                maxBal = bal;
+                newCoinIds.USDC = coin.coinObjectId;
+              }
+            }
         } catch {}
 
-        // Fetch ETH
+        // Fetch ETH and its coin object ID
         try {
             const ethCoins = await suiClient.getCoins({ owner: account.address, coinType: getCoinType("ETH") });
             newBalances.ETH = ethCoins.data.reduce((acc, c) => acc + (Number(c.balance) / 100_000_000), 0);
+            // Get the coin with highest balance
+            let maxBal = 0;
+            for (const coin of ethCoins.data) {
+              const bal = Number(coin.balance) / 100_000_000;
+              if (bal > maxBal) {
+                maxBal = bal;
+                newCoinIds.ETH = coin.coinObjectId;
+              }
+            }
         } catch {}
 
         setBalances(newBalances);
+        setCollateralCoinIds(newCoinIds);
         
         // Update asset balance based on selection
         setAssetBalance(newBalances[asset as keyof typeof newBalances] || 0);
 
-        // 3. Determine Coin Object ID
-        // For Lend: We need Asset Coin Object
-        // For Borrow: We need Collateral Coin Object (SUI)
-        
+        // 3. Determine Coin Object ID for Lend orders
         let targetCoinType = "";
         let targetDecimals = 9;
         
@@ -118,7 +142,7 @@ export function CreateOrderForm({ type, onSubmit, isSubmitting = false }: Create
             targetDecimals = getDecimalsForAsset(asset);
           }
         } else {
-          // Borrow:
+          // Borrow: collateral coin IDs already fetched above
           setCoinObjectId(undefined); 
         }
 
@@ -203,11 +227,27 @@ export function CreateOrderForm({ type, onSubmit, isSubmitting = false }: Create
     for (const [coin, amt] of Object.entries(collateralAmounts)) {
         totalCollateralValue += parseFloat(amt || "0") * prices[coin as keyof typeof prices];
     }
-    const equivalentSui = totalCollateralValue / prices.SUI; // Convert to SUI units for 'collateralAmount' prop compatibility
 
     const collateralsList = Object.entries(collateralAmounts)
         .filter(([_, amt]) => parseFloat(amt || "0") > 0)
         .map(([asset, amt]) => ({ asset, amount: parseFloat(amt) }));
+
+    // Determine primary collateral (the one with the highest value)
+    // This is used for selecting the correct Market<Asset, Collateral> on-chain
+    let primaryCollateral = "SUI"; // default
+    let primaryCollateralAmount = 0;
+    
+    for (const [coin, amt] of Object.entries(collateralAmounts)) {
+      const amtNum = parseFloat(amt || "0");
+      const value = amtNum * prices[coin as keyof typeof prices];
+      if (value > primaryCollateralAmount) {
+        primaryCollateralAmount = value;
+        primaryCollateral = coin;
+      }
+    }
+
+    // Calculate collateral amount in primary collateral's units
+    const collateralAmountInPrimary = parseFloat(collateralAmounts[primaryCollateral] || "0");
 
     onSubmit({
       asset,
@@ -217,7 +257,11 @@ export function CreateOrderForm({ type, onSubmit, isSubmitting = false }: Create
       term: parseInt(term),
       isHidden,
       coinObjectId,
-      collateralAmount: type === 'borrow' ? equivalentSui : undefined,
+      collateralAmount: type === 'borrow' ? collateralAmountInPrimary : undefined,
+      collateral: type === 'borrow' ? primaryCollateral : undefined,
+      collateralCoinId: type === 'borrow' && primaryCollateral !== 'SUI' 
+        ? collateralCoinIds[primaryCollateral] 
+        : undefined,
       collaterals: type === 'borrow' ? collateralsList : undefined,
     });
   };

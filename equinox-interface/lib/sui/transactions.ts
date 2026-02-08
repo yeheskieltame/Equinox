@@ -16,6 +16,8 @@ interface CreateOrderParams {
   collateralAmount?: number;
   collateralPrice?: number;
   assetPrice?: number;
+  // Required for non-SUI collateral (ETH, USDC)
+  collateralCoinId?: string;
 }
 
 interface DepositToVaultParams {
@@ -46,23 +48,77 @@ const getRegistryId = () => env.sui.registryId;
 const getVestingVaultId = () => env.sui.vestingVaultId;
 const getPackageId = () => env.sui.packageId;
 
+// Static market ID mapping - Next.js requires static env var references
+// because it does static replacement at build time
+const MARKET_IDS: { [key: string]: string | undefined } = {
+  // Default: Market<USDC, SUI>
+  "USDC_SUI": process.env.NEXT_PUBLIC_MARKET_ID,
+  // Additional markets
+  "USDC_ETH": process.env.NEXT_PUBLIC_MARKET_ID_USDC_ETH,
+  "SUI_USDC": process.env.NEXT_PUBLIC_MARKET_ID_SUI_USDC,
+  "SUI_ETH": process.env.NEXT_PUBLIC_MARKET_ID_SUI_ETH,
+  "ETH_SUI": process.env.NEXT_PUBLIC_MARKET_ID_ETH_SUI,
+  "ETH_USDC": process.env.NEXT_PUBLIC_MARKET_ID_ETH_USDC,
+};
+
 // Market IDs for different pairs
 const getMarketId = (asset: string, collateral: string) => {
-  const marketId = env.sui.marketId;
-  // For MVP, we use configured market ID
-  // In production, this would be fetched from registry per asset/collateral pair
-  if (!marketId) {
+  // Normalize asset names
+  const assetNorm = asset.toUpperCase();
+  const collateralNorm = collateral.toUpperCase();
+  
+  // Build the pair key
+  const pairKey = `${assetNorm}_${collateralNorm}`;
+  const marketId = MARKET_IDS[pairKey];
+  
+  if (marketId) {
+    return marketId;
+  }
+  
+  // Fallback to default market ID (for backward compatibility)
+  // This is typically Market<USDC, SUI>
+  const defaultMarketId = env.sui.marketId;
+  
+  if (defaultMarketId) {
+    // Only use default if it matches USDC/SUI pair
+    if (assetNorm === "USDC" && collateralNorm === "SUI") {
+      return defaultMarketId;
+    }
+    
+    // For other pairs, we need a specific market
     throw new Error(
-      `Market ID not configured. To use orderbook, you need to create a Market object first:\n\n` +
-      `1. Run: sui client call --package ${env.sui.packageId} --module market ` +
-      `--function create_market_standalone --type-args "${env.sui.packageId}::mock_usdc::MOCK_USDC" "0x2::sui::SUI" ` +
+      `No market configured for ${assetNorm}/${collateralNorm}. ` +
+      `Please create and configure the market:\n\n` +
+      `1. Create market:\n` +
+      `   sui client call --package ${env.sui.packageId} --module market ` +
+      `--function create_market_standalone ` +
+      `--type-args "${env.sui.packageId}::mock_${assetNorm.toLowerCase()}::MOCK_${assetNorm}" ` +
+      `"${getAssetCoinTypeForError(collateralNorm)}" ` +
       `--args '[]' --gas-budget 50000000\n\n` +
-      `2. Copy the created Market object ID from the transaction output\n` +
-      `3. Add to .env.local: NEXT_PUBLIC_MARKET_ID=<object_id>`
+      `2. Add to .env.local:\n` +
+      `   NEXT_PUBLIC_MARKET_ID_${pairKey}=<created_object_id>`
     );
   }
-  return marketId;
+  
+  throw new Error(
+    `Market ID not configured. To use orderbook, create Market objects first.\n` +
+    `See README.md for instructions on creating markets for each asset/collateral pair.`
+  );
 };
+
+// Helper for error messages
+function getAssetCoinTypeForError(asset: string): string {
+  const packageId = env.sui.packageId;
+  switch (asset.toUpperCase()) {
+    case "USDC":
+      return `${packageId}::mock_usdc::MOCK_USDC`;
+    case "ETH":
+      return `${packageId}::mock_eth::MOCK_ETH`;
+    case "SUI":
+    default:
+      return "0x2::sui::SUI";
+  }
+}
 
 // Helper to get coin type argument based on asset
 function getAssetCoinType(asset: string, packageId: string): string {
@@ -228,7 +284,7 @@ export function buildCreateOrderTx(params: CreateOrderParams): Transaction {
   const collateral = params.collateral || "SUI";
 
   if (params.type === "lend") {
-    // For lend order, we need to split coins from gas
+    // For lend order, we need to split coins to exact amount
     const amountInSmallest = toSmallestUnit(params.amount, params.asset);
     
     if (params.asset === "SUI") {
@@ -250,27 +306,66 @@ export function buildCreateOrderTx(params: CreateOrderParams): Transaction {
         ],
       });
     } else {
-      // For other assets, user needs to provide coin object
+      // For non-SUI assets (USDC, ETH), split exact amount from coin object
       if (!params.coinObjectId) {
         throw new Error(`For non-SUI assets (${params.asset}), coinObjectId is required`);
       }
-      return buildLendOrderTx({
-        asset: params.asset,
-        collateral: collateral,
-        amount: params.amount,
-        interestRate: params.interestRate,
-        term: params.term,
-        coinObjectId: params.coinObjectId,
+      
+      // Split exact amount from the coin object
+      const [coin] = tx.splitCoins(
+        tx.object(params.coinObjectId),
+        [amountInSmallest]
+      );
+      
+      tx.moveCall({
+        target: `${packageId}::market::place_lend_order`,
+        typeArguments: [
+          getAssetCoinType(params.asset, packageId),
+          getAssetCoinType(collateral, packageId),
+        ],
+        arguments: [
+          tx.object(marketId),
+          coin,
+          tx.pure.u64(interestRateBps),
+          tx.pure.u64(durationMs),
+          tx.object("0x6"), // Clock object
+        ],
       });
     }
   } else {
     // Borrow order
     const amountInSmallest = toSmallestUnit(params.amount, params.asset);
-    const collateralAmount = toSmallestUnit(params.collateralAmount || 0, collateral);
+    const collateralAmountInSmallest = toSmallestUnit(params.collateralAmount || 0, collateral);
+    
+    if (collateralAmountInSmallest <= BigInt(0)) {
+      throw new Error("Collateral amount must be greater than 0");
+    }
     
     if (collateral === "SUI") {
       // Split SUI from gas as collateral
-      const [collateralCoin] = tx.splitCoins(tx.gas, [collateralAmount]);
+      const [collateralCoin] = tx.splitCoins(tx.gas, [collateralAmountInSmallest]);
+      
+      tx.moveCall({
+        target: `${packageId}::market::place_borrow_order_standalone`,
+        typeArguments: [
+          getAssetCoinType(params.asset, packageId),
+          getAssetCoinType(collateral, packageId),
+        ],
+        arguments: [
+          tx.object(marketId),
+          collateralCoin,
+          tx.pure.u64(amountInSmallest),
+          tx.pure.u64(interestRateBps),
+          tx.pure.u64(durationMs),
+          tx.object("0x6"), // Clock object
+        ],
+      });
+    } else if (params.collateralCoinId) {
+      // Non-SUI collateral (ETH, USDC) - split exact amount from coin object
+      const [collateralCoin] = tx.splitCoins(
+        tx.object(params.collateralCoinId),
+        [collateralAmountInSmallest]
+      );
       
       tx.moveCall({
         target: `${packageId}::market::place_borrow_order_standalone`,
@@ -288,7 +383,10 @@ export function buildCreateOrderTx(params: CreateOrderParams): Transaction {
         ],
       });
     } else {
-      throw new Error("For non-SUI collateral, provide collateralCoinId");
+      throw new Error(
+        `For ${collateral} collateral, you need to provide a coin object.\n` +
+        `Please mint some ${collateral} tokens first using the Faucet page.`
+      );
     }
   }
 
