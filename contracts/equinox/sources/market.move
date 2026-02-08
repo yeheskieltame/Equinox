@@ -1,4 +1,7 @@
-#[allow(lint(public_entry))]
+#[allow(lint(public_entry), unused_const, duplicate_alias, deprecated_usage, unused_use)]
+/// Market Module for Equinox Protocol
+/// Implements Dynamic Order Book Matching with multi-collateral support
+/// Integrates with DeepBook V3 for liquidation routing and price discovery
 module equinox::market {
     use sui::coin::{Self, Coin};
     use sui::balance::{Self, Balance};
@@ -7,10 +10,29 @@ module equinox::market {
     use sui::event;
     use sui::ed25519;
     use std::option;
-    use deepbook::pool::Pool;
-    use deepbook::balance_manager::BalanceManager;
+    use deepbook::pool::{Self as db_pool, Pool};
+    use deepbook::balance_manager::{Self, BalanceManager, TradeProof};
+    use token::deep::DEEP;
     
     use equinox::loan::{Self};
+    use equinox::registry::{Self, Registry};
+
+    // ============== ERROR CODES ==============
+    const EOrderNotFound: u64 = 0;
+    const ERateMismatch: u64 = 1;
+    const EAmountMismatch: u64 = 2;
+    const EDurationMismatch: u64 = 3;
+    const EInvalidFairnessProof: u64 = 4;
+    const EInsufficientLiquidation: u64 = 5;
+    const EUnauthorizedBalanceManager: u64 = 6;
+    const EInsufficientProfit: u64 = 7;
+    const EInsufficientCollateral: u64 = 8;
+    const ECollateralNotSupported: u64 = 9;
+    const EAssetNotSupported: u64 = 10;
+    const EExceedsMaxLTV: u64 = 11;
+    const EMarketPaused: u64 = 12;
+
+    // ============== STRUCTS ==============
 
     /// Nautilus Enclave Configuration
     public struct EnclaveConfig has key, store {
@@ -30,22 +52,17 @@ module equinox::market {
         is_active: bool,
     }
 
-    const EOrderNotFound: u64 = 0;
-    const ERateMismatch: u64 = 1;
-    const EAmountMismatch: u64 = 2;
-    const EDurationMismatch: u64 = 3;
-    const EInvalidFairnessProof: u64 = 4;
-    // const EInsufficientLiquidation: u64 = 5; // Reserved for future DeepBook integration
-
-
-    /// Represents an Order in the orderbook.
+    /// Represents an Order in the orderbook
     public struct Order has store, drop {
         creator: address,
         amount: u64,
         interest_rate_bps: u64,
-        duration_ms: u64, // Custom term duration
-        is_lend: bool, 
+        duration_ms: u64,
+        is_lend: bool,
         created_at: u64,
+        /// Price at order creation (for LTV calculation)
+        collateral_price: u64,
+        asset_price: u64,
     }
 
     /// Borrow order with vesting collateral (gets priority + subsidy)
@@ -55,38 +72,64 @@ module equinox::market {
         interest_rate_bps: u64,
         duration_ms: u64,
         vesting_position_id: ID,
-        fairness_boost: u64, // Bonus score for matching priority
-        subsidy_rate_bps: u64, // Subsidy APR
+        fairness_boost: u64,
+        subsidy_rate_bps: u64,
         created_at: u64,
     }
 
-    /// Represents a ZK-Hidden Order.
-    /// Only the commitment (hash of details) is stored on-chain.
+    /// Represents a ZK-Hidden Order
     public struct HiddenOrder has store, drop {
         creator: address,
-        commitment: vector<u8>, // Pedersen Hash of (amount, rate, etc.)
+        commitment: vector<u8>,
         is_lend: bool,
         created_at: u64,
     }
 
-    /// The Market shared object.
-    /// Asset: The token being lent/borrowed (e.g. USDC).
-    /// Collateral: The token used as collateral (e.g. SUI).
+    /// The Market shared object
+    /// Supports multi-collateral lending via Registry
+    /// Asset: The token being lent/borrowed (e.g. USDC)
+    /// Collateral: The token used as collateral (e.g. SUI, ETH)
     public struct Market<phantom Asset, phantom Collateral> has key {
         id: UID,
+        /// Normal limit orders
         orders: Table<ID, Order>,
-        hidden_orders: Table<ID, HiddenOrder>, // ZK Privacy Orders
+        /// ZK-hidden orders
+        hidden_orders: Table<ID, HiddenOrder>,
+        /// Lender deposits indexed by order ID
         lend_balances: Table<ID, Balance<Asset>>,
+        /// Borrower collateral indexed by order ID
         collateral_balances: Table<ID, Balance<Collateral>>,
-        fairness_verifier: vector<u8>, // Official Nautilus Agent Public Key (deprecated - use enclave_id)
-        enclave_id: option::Option<ID>, // Reference to RegisteredEnclave
-        vested_orders: Table<ID, VestedBorrowOrder>, // Vesting collateral orders
-        total_vested_volume: u64, // Track vested collateral usage
+        /// Deprecated: use enclave_id
+        fairness_verifier: vector<u8>,
+        /// Reference to RegisteredEnclave
+        enclave_id: option::Option<ID>,
+        /// Vesting collateral orders
+        vested_orders: Table<ID, VestedBorrowOrder>,
+        /// Track vested collateral usage
+        total_vested_volume: u64,
+        /// DeepBook Pool for liquidations
+        deepbook_pool_id: option::Option<ID>,
+        /// Market status
+        is_active: bool,
+        /// Total volume lent
+        total_lend_volume: u64,
+        /// Total volume borrowed
+        total_borrow_volume: u64,
+        /// Active orders count
+        active_orders: u64,
     }
-    
-    /// Events
+
+    // ============== EVENTS ==============
+
+    public struct MarketCreated has copy, drop {
+        market_id: ID,
+        asset_type: std::ascii::String,
+        collateral_type: std::ascii::String,
+    }
+
     public struct OrderPlaced has copy, drop {
         order_id: ID,
+        market_id: ID,
         is_lend: bool,
         amount: u64,
         rate: u64,
@@ -98,6 +141,13 @@ module equinox::market {
         borrow_order_id: ID,
         amount: u64,
         duration: u64,
+        final_rate: u64,
+    }
+
+    public struct OrderCancelled has copy, drop {
+        order_id: ID,
+        creator: address,
+        is_lend: bool,
     }
 
     public struct LoanLiquidated has copy, drop {
@@ -105,6 +155,7 @@ module equinox::market {
         liquidator: address,
         collateral_sold: u64,
         asset_received: u64,
+        debt_repaid: u64,
         profit: u64,
     }
 
@@ -137,11 +188,56 @@ module equinox::market {
         subsidy_rate_bps: u64,
     }
 
+    public struct DeepBookPoolSet has copy, drop {
+        market_id: ID,
+        pool_id: ID,
+    }
+
+    // ============== INIT ==============
+
     fun init(_ctx: &mut TxContext) {
     }
 
-    /// Create a new market pair.
+    // ============== MARKET CREATION ==============
+
+    /// Create a new market pair with Registry validation
     public entry fun create_market<Asset, Collateral>(
+        registry: &Registry,
+        fairness_verifier: vector<u8>,
+        ctx: &mut TxContext
+    ) {
+        // Validate asset and collateral are supported
+        assert!(registry::is_asset_supported<Asset>(registry), EAssetNotSupported);
+        assert!(registry::is_collateral_supported<Collateral>(registry), ECollateralNotSupported);
+
+        let market = Market<Asset, Collateral> {
+            id: object::new(ctx),
+            orders: table::new(ctx),
+            hidden_orders: table::new(ctx),
+            lend_balances: table::new(ctx),
+            collateral_balances: table::new(ctx),
+            fairness_verifier,
+            enclave_id: option::none(),
+            vested_orders: table::new(ctx),
+            total_vested_volume: 0,
+            deepbook_pool_id: option::none(),
+            is_active: true,
+            total_lend_volume: 0,
+            total_borrow_volume: 0,
+            active_orders: 0,
+        };
+
+        event::emit(MarketCreated {
+            market_id: object::id(&market),
+            asset_type: std::type_name::get<Asset>().into_string(),
+            collateral_type: std::type_name::get<Collateral>().into_string(),
+        });
+
+        transfer::share_object(market);
+    }
+
+    /// Create market without registry (for testing/bootstrap)
+    public entry fun create_market_standalone<Asset, Collateral>(
         fairness_verifier: vector<u8>,
         ctx: &mut TxContext
     ) {
@@ -155,9 +251,23 @@ module equinox::market {
             enclave_id: option::none(),
             vested_orders: table::new(ctx),
             total_vested_volume: 0,
+            deepbook_pool_id: option::none(),
+            is_active: true,
+            total_lend_volume: 0,
+            total_borrow_volume: 0,
+            active_orders: 0,
         };
+
+        event::emit(MarketCreated {
+            market_id: object::id(&market),
+            asset_type: std::type_name::get<Asset>().into_string(),
+            collateral_type: std::type_name::get<Collateral>().into_string(),
+        });
+
         transfer::share_object(market);
     }
+
+    // ============== ENCLAVE MANAGEMENT ==============
 
     /// Register Nautilus Enclave Configuration
     public entry fun register_enclave_config(
@@ -188,9 +298,6 @@ module equinox::market {
         clock: &Clock,
         ctx: &mut TxContext
     ) {
-        // In production: verify AWS Nitro attestation here
-        // For MVP: trust the deployer
-        
         let enclave = RegisteredEnclave {
             id: object::new(ctx),
             public_key,
@@ -210,16 +317,34 @@ module equinox::market {
         transfer::share_object(enclave);
     }
 
-    /// Set enclave for market
+    /// Link enclave to market
     public entry fun set_market_enclave<Asset, Collateral>(
         market: &mut Market<Asset, Collateral>,
-        enclave_id: ID,
+        enclave: &RegisteredEnclave,
         _ctx: &mut TxContext
     ) {
-        market.enclave_id = option::some(enclave_id);
+        market.enclave_id = option::some(object::id(enclave));
     }
 
-    /// Place a Lending Order with Custom Terms.
+    // ============== DEEPBOOK INTEGRATION ==============
+
+    /// Set DeepBook pool for liquidations
+    public entry fun set_deepbook_pool<Asset, Collateral>(
+        market: &mut Market<Asset, Collateral>,
+        pool_id: ID,
+        _ctx: &mut TxContext
+    ) {
+        market.deepbook_pool_id = option::some(pool_id);
+        
+        event::emit(DeepBookPoolSet {
+            market_id: object::id(market),
+            pool_id,
+        });
+    }
+
+    // ============== ORDER PLACEMENT ==============
+
+    /// Place a Lending Order with Custom Terms
     public fun place_lend_order<Asset, Collateral>(
         market: &mut Market<Asset, Collateral>,
         payment: Coin<Asset>,
@@ -228,6 +353,8 @@ module equinox::market {
         clock: &Clock,
         ctx: &mut TxContext
     ): ID {
+        assert!(market.is_active, EMarketPaused);
+        
         let amount = coin::value(&payment);
         
         let uid = object::new(ctx);
@@ -241,13 +368,19 @@ module equinox::market {
             duration_ms,
             is_lend: true,
             created_at: clock::timestamp_ms(clock),
+            collateral_price: 0,
+            asset_price: 0,
         };
 
         table::add(&mut market.orders, id, order);
         table::add(&mut market.lend_balances, id, coin::into_balance(payment));
 
+        market.total_lend_volume = market.total_lend_volume + amount;
+        market.active_orders = market.active_orders + 1;
+
         event::emit(OrderPlaced {
             order_id: id,
+            market_id: object::id(market),
             is_lend: true,
             amount,
             rate: interest_rate_bps,
@@ -257,16 +390,29 @@ module equinox::market {
         id
     }
 
-    /// Place a Borrow Order with Custom Terms.
+    /// Place a Borrow Order with Custom Terms and LTV validation
     public fun place_borrow_order<Asset, Collateral>(
         market: &mut Market<Asset, Collateral>,
+        registry: &Registry,
         collateral: Coin<Collateral>,
         amount_requested: u64,
         interest_rate_bps: u64,
         duration_ms: u64,
+        collateral_price: u64,
+        asset_price: u64,
         clock: &Clock,
         ctx: &mut TxContext
     ): ID {
+        assert!(market.is_active, EMarketPaused);
+        
+        // Validate LTV
+        let collateral_amount = coin::value(&collateral);
+        let max_ltv = registry::get_max_ltv<Collateral>(registry);
+        let collateral_value = (collateral_amount as u128) * (collateral_price as u128);
+        let borrow_value = (amount_requested as u128) * (asset_price as u128);
+        let current_ltv = borrow_value * 10000 / collateral_value;
+        assert!(current_ltv <= (max_ltv as u128), EExceedsMaxLTV);
+
         let uid = object::new(ctx);
         let id = object::uid_to_inner(&uid);
         object::delete(uid);
@@ -278,13 +424,64 @@ module equinox::market {
             duration_ms,
             is_lend: false,
             created_at: clock::timestamp_ms(clock),
+            collateral_price,
+            asset_price,
         };
 
         table::add(&mut market.orders, id, order);
         table::add(&mut market.collateral_balances, id, coin::into_balance(collateral));
 
+        market.total_borrow_volume = market.total_borrow_volume + amount_requested;
+        market.active_orders = market.active_orders + 1;
+
         event::emit(OrderPlaced {
             order_id: id,
+            market_id: object::id(market),
+            is_lend: false,
+            amount: amount_requested,
+            rate: interest_rate_bps,
+            duration: duration_ms,
+        });
+
+        id
+    }
+
+    /// Place a Borrow Order without registry (for testing)
+    public fun place_borrow_order_standalone<Asset, Collateral>(
+        market: &mut Market<Asset, Collateral>,
+        collateral: Coin<Collateral>,
+        amount_requested: u64,
+        interest_rate_bps: u64,
+        duration_ms: u64,
+        clock: &Clock,
+        ctx: &mut TxContext
+    ): ID {
+        assert!(market.is_active, EMarketPaused);
+
+        let uid = object::new(ctx);
+        let id = object::uid_to_inner(&uid);
+        object::delete(uid);
+
+        let order = Order {
+            creator: tx_context::sender(ctx),
+            amount: amount_requested,
+            interest_rate_bps,
+            duration_ms,
+            is_lend: false,
+            created_at: clock::timestamp_ms(clock),
+            collateral_price: 0,
+            asset_price: 0,
+        };
+
+        table::add(&mut market.orders, id, order);
+        table::add(&mut market.collateral_balances, id, coin::into_balance(collateral));
+
+        market.total_borrow_volume = market.total_borrow_volume + amount_requested;
+        market.active_orders = market.active_orders + 1;
+
+        event::emit(OrderPlaced {
+            order_id: id,
+            market_id: object::id(market),
             is_lend: false,
             amount: amount_requested,
             rate: interest_rate_bps,
@@ -295,22 +492,22 @@ module equinox::market {
     }
 
     /// Place Borrow Order with Vesting Collateral
-    /// Gets priority matching + subsidy rate
     public fun place_vested_borrow_order<Asset, Collateral>(
         market: &mut Market<Asset, Collateral>,
         collateral: Coin<Collateral>,
         amount_requested: u64,
         interest_rate_bps: u64,
         duration_ms: u64,
-        vesting_position_id: ID, // Reference to VestingPosition
+        vesting_position_id: ID,
         clock: &Clock,
         ctx: &mut TxContext
     ): ID {
+        assert!(market.is_active, EMarketPaused);
+
         let uid = object::new(ctx);
         let id = object::uid_to_inner(&uid);
         object::delete(uid);
 
-        // Calculate fairness boost and subsidy
         let fairness_boost = calculate_vesting_boost(amount_requested, duration_ms);
         let subsidy_rate_bps = calculate_subsidy_rate(duration_ms);
 
@@ -328,8 +525,8 @@ module equinox::market {
         table::add(&mut market.vested_orders, id, order);
         table::add(&mut market.collateral_balances, id, coin::into_balance(collateral));
         
-        // Track vested volume
         market.total_vested_volume = market.total_vested_volume + amount_requested;
+        market.active_orders = market.active_orders + 1;
 
         event::emit(VestedOrderPlaced {
             order_id: id,
@@ -343,165 +540,59 @@ module equinox::market {
         id
     }
 
-    /// Calculate fairness boost for vested collateral
-    /// Boost based on order size (retail gets more) and vesting commitment
-    fun calculate_vesting_boost(amount: u64, duration_ms: u64): u64 {
-        let mut boost = 50; // Base 50% boost for vested collateral
+    // ============== ORDER CANCELLATION ==============
 
-        // Retail boost: orders < 10k get extra priority
-        if (amount < 10000_000000) { // < 10k USDC
-            boost = boost + 30; // +30% for retail
-        };
-
-        // Duration boost: longer lock = higher priority
-        let days = duration_ms / 86400000;
-        if (days >= 30) {
-            boost = boost + 20; // +20% for 30+ days
-        };
-
-        boost
-    }
-
-    /// Calculate subsidy rate for vested collateral
-    /// Subsidy to offset vesting opportunity cost
-    fun calculate_subsidy_rate(duration_ms: u64): u64 {
-        let days = duration_ms / 86400000;
-        
-        // Base subsidy: 2% APR
-        let mut subsidy = 200; // 200 bps = 2%
-        
-        // Longer lock = higher subsidy
-        if (days >= 90) {
-            subsidy = 300; // 3% for 90+ days
-        } else if (days >= 30) {
-            subsidy = 250; // 2.5% for 30+ days
-        };
-        
-        subsidy
-    }
-
-    /// Execute a match with AI Fairness Check & Dynamic Terms.
-    /// Uses registered Nautilus enclave for verifiable fairness computation
-    public fun match_orders<Asset, Collateral>(
+    /// Cancel a lend order and return funds
+    public fun cancel_lend_order<Asset, Collateral>(
         market: &mut Market<Asset, Collateral>,
-        enclave: &RegisteredEnclave,
-        lend_order_id: ID,
-        borrow_order_id: ID,
-        fairness_score: u64,
-        fairness_proof: vector<u8>, // Ed25519 Signature from enclave
-        clock: &Clock,
+        order_id: ID,
         ctx: &mut TxContext
-    ) {
-        // 0. Verify enclave is active and registered with market
-        assert!(enclave.is_active, EInvalidFairnessProof);
-        if (option::is_some(&market.enclave_id)) {
-            assert!(option::borrow(&market.enclave_id) == &object::id(enclave), EInvalidFairnessProof);
-        };
-
-        // 1. Verify Fairness Proof from Nautilus Enclave
-        // Message: lend_order_id || borrow_order_id || fairness_score
-        let mut msg = vector::empty<u8>();
-        vector::append(&mut msg, object::id_to_bytes(&lend_order_id));
-        vector::append(&mut msg, object::id_to_bytes(&borrow_order_id));
+    ): Coin<Asset> {
+        assert!(table::contains(&market.orders, order_id), EOrderNotFound);
         
-        // Append fairness score as bytes
-        let score_bytes = sui::bcs::to_bytes(&fairness_score);
-        vector::append(&mut msg, score_bytes);
-        
-        // Verify signature from registered enclave
-        assert!(
-            ed25519::ed25519_verify(
-                &fairness_proof, 
-                &enclave.public_key, 
-                &msg
-            ), 
-            EInvalidFairnessProof
-        );
+        let order = table::remove(&mut market.orders, order_id);
+        assert!(order.is_lend, EOrderNotFound);
+        assert!(order.creator == tx_context::sender(ctx), EOrderNotFound);
 
-        // Emit fairness verification event
-        event::emit(FairnessVerified {
-            lend_order_id,
-            borrow_order_id,
-            fairness_score,
-            enclave_id: object::id(enclave),
+        let balance = table::remove(&mut market.lend_balances, order_id);
+        market.active_orders = market.active_orders - 1;
+
+        event::emit(OrderCancelled {
+            order_id,
+            creator: order.creator,
+            is_lend: true,
         });
 
-        match_orders_internal(market, lend_order_id, borrow_order_id, clock, ctx);
+        coin::from_balance(balance, ctx)
     }
 
-    /// Internal function to execute matching logic after verification
-    fun match_orders_internal<Asset, Collateral>(
+    /// Cancel a borrow order and return collateral
+    public fun cancel_borrow_order<Asset, Collateral>(
         market: &mut Market<Asset, Collateral>,
-        lend_order_id: ID,
-        borrow_order_id: ID,
-        clock: &Clock,
+        order_id: ID,
         ctx: &mut TxContext
-    ) {
-        assert!(table::contains(&market.orders, lend_order_id), EOrderNotFound);
-        assert!(table::contains(&market.orders, borrow_order_id), EOrderNotFound);
-
-        let lend_order = table::remove(&mut market.orders, lend_order_id);
-        let borrow_order = table::remove(&mut market.orders, borrow_order_id);
-
-        assert!(lend_order.is_lend, EOrderNotFound);
-        assert!(!borrow_order.is_lend, EOrderNotFound);
-
-        // Dynamic Matching Logic
-        // 1. Rates: Borrow Rate >= Lend Rate
-        assert!(borrow_order.interest_rate_bps >= lend_order.interest_rate_bps, ERateMismatch);
+    ): Coin<Collateral> {
+        assert!(table::contains(&market.orders, order_id), EOrderNotFound);
         
-        // 2. Duration: Lend Order must cover the requested Borrow Duration
-        // (Lender is willing to wait X, Borrower needs Y. So X >= Y)
-        assert!(lend_order.duration_ms >= borrow_order.duration_ms, EDurationMismatch);
+        let order = table::remove(&mut market.orders, order_id);
+        assert!(!order.is_lend, EOrderNotFound);
+        assert!(order.creator == tx_context::sender(ctx), EOrderNotFound);
 
-        // 3. Amount
-        assert!(lend_order.amount == borrow_order.amount, EAmountMismatch);
+        let balance = table::remove(&mut market.collateral_balances, order_id);
+        market.active_orders = market.active_orders - 1;
 
-        // 1. Move Asset -> Borrower
-        let lend_balance = table::remove(&mut market.lend_balances, lend_order_id);
-        let loan_amount = balance::value(&lend_balance);
-        let asset_coin = coin::from_balance(lend_balance, ctx);
-        transfer::public_transfer(asset_coin, borrow_order.creator);
-
-        // 2. Extract Collateral
-        let collateral_balance = table::remove(&mut market.collateral_balances, borrow_order_id);
-        
-        // 3. Create Loan with AGREED Dynamic Terms (Borrower's duration)
-        let loan = loan::create_loan<Asset, Collateral>(
-            borrow_order.creator,
-            lend_order.creator,
-            loan_amount,
-            lend_order.interest_rate_bps,
-            clock::timestamp_ms(clock),
-            borrow_order.duration_ms, // Use dynamic duration
-            collateral_balance,
-            ctx
-        );
-
-        transfer::public_transfer(loan, lend_order.creator);
-
-        event::emit(OrderMatched {
-            lend_order_id,
-            borrow_order_id,
-            amount: loan_amount,
-            duration: borrow_order.duration_ms,
+        event::emit(OrderCancelled {
+            order_id,
+            creator: order.creator,
+            is_lend: false,
         });
+
+        coin::from_balance(balance, ctx)
     }
 
-    #[test_only]
-    public fun match_orders_for_testing<Asset, Collateral>(
-        market: &mut Market<Asset, Collateral>,
-        lend_order_id: ID,
-        borrow_order_id: ID,
-        clock: &Clock,
-        ctx: &mut TxContext
-    ) {
-        match_orders_internal(market, lend_order_id, borrow_order_id, clock, ctx);
-    }
+    // ============== ZK HIDDEN ORDERS ==============
 
-    /// Place a Hidden Lending Order (ZK-Privacy).
-    /// The terms (Interest Rate, Duration) are hidden in the `commitment`.
-    /// The Amount is public (for solvency check).
+    /// Place a Hidden Lending Order (ZK-Privacy)
     public fun place_hidden_lend_order<Asset, Collateral>(
         market: &mut Market<Asset, Collateral>,
         payment: Coin<Asset>,
@@ -509,6 +600,8 @@ module equinox::market {
         clock: &Clock,
         ctx: &mut TxContext
     ): ID {
+        assert!(market.is_active, EMarketPaused);
+        
         let amount = coin::value(&payment);
         
         let uid = object::new(ctx);
@@ -535,58 +628,295 @@ module equinox::market {
         id
     }
 
-    /// Liquidate via DeepBook Swap - SIMPLIFIED VERSION
-    /// TODO: Complete DeepBook V3 integration with proper API
-    /// For MVP: Returns collateral to liquidator, debt tracking on-chain
-    #[allow(lint(self_transfer))]
-    public fun liquidate_via_deepbook<Asset, Collateral>(
-        loan: loan::Loan<Asset, Collateral>,
-        _db_pool: &mut Pool<Collateral, Asset>,
-        _balance_mgr: &mut BalanceManager,
-        clock: &Clock,
-        ctx: &mut TxContext
-    ): (address, u64, u64) {
-        // 1. Unwrap the defaulted loan
-        let (collateral_balance, total_debt, lender) = loan::unwrap_for_liquidation(loan, clock);
-        let collateral_amount = balance::value(&collateral_balance);
-        let collateral_coin = coin::from_balance(collateral_balance, ctx);
-        
-        // 2. For MVP: Transfer collateral to liquidator
-        // TODO: Implement actual DeepBook swap when API is stable
-        // The liquidator can manually swap on DeepBook and repay lender
-        transfer::public_transfer(collateral_coin, tx_context::sender(ctx));
-        
-        // Return (lender, debt, collateral_amount) for tracking
-        (lender, total_debt, collateral_amount)
+    // ============== ORDER MATCHING ==============
+
+    /// Calculate fairness boost for vested collateral
+    fun calculate_vesting_boost(amount: u64, duration_ms: u64): u64 {
+        let mut boost = 50;
+
+        if (amount < 10000_000000) {
+            boost = boost + 30;
+        };
+
+        let days = duration_ms / 86400000;
+        if (days >= 30) {
+            boost = boost + 20;
+        };
+
+        boost
     }
 
-    /// Entry function for liquidation - SIMPLIFIED
-    /// Liquidator receives collateral, must manually repay lender
-    public entry fun liquidate_and_transfer<Asset, Collateral>(
+    /// Calculate subsidy rate for vested collateral
+    fun calculate_subsidy_rate(duration_ms: u64): u64 {
+        let days = duration_ms / 86400000;
+        
+        let mut subsidy = 200;
+        
+        if (days >= 90) {
+            subsidy = 300;
+        } else if (days >= 30) {
+            subsidy = 250;
+        };
+        
+        subsidy
+    }
+
+    /// Execute a match with AI Fairness Check
+    public fun match_orders<Asset, Collateral>(
+        market: &mut Market<Asset, Collateral>,
+        enclave: &RegisteredEnclave,
+        lend_order_id: ID,
+        borrow_order_id: ID,
+        fairness_score: u64,
+        fairness_proof: vector<u8>,
+        clock: &Clock,
+        ctx: &mut TxContext
+    ) {
+        assert!(enclave.is_active, EInvalidFairnessProof);
+        if (option::is_some(&market.enclave_id)) {
+            assert!(option::borrow(&market.enclave_id) == &object::id(enclave), EInvalidFairnessProof);
+        };
+
+        let mut msg = vector::empty<u8>();
+        vector::append(&mut msg, object::id_to_bytes(&lend_order_id));
+        vector::append(&mut msg, object::id_to_bytes(&borrow_order_id));
+        
+        let score_bytes = sui::bcs::to_bytes(&fairness_score);
+        vector::append(&mut msg, score_bytes);
+        
+        assert!(
+            ed25519::ed25519_verify(
+                &fairness_proof, 
+                &enclave.public_key, 
+                &msg
+            ), 
+            EInvalidFairnessProof
+        );
+
+        event::emit(FairnessVerified {
+            lend_order_id,
+            borrow_order_id,
+            fairness_score,
+            enclave_id: object::id(enclave),
+        });
+
+        match_orders_internal(market, lend_order_id, borrow_order_id, clock, ctx);
+    }
+
+    /// Internal function to execute matching logic
+    fun match_orders_internal<Asset, Collateral>(
+        market: &mut Market<Asset, Collateral>,
+        lend_order_id: ID,
+        borrow_order_id: ID,
+        clock: &Clock,
+        ctx: &mut TxContext
+    ) {
+        assert!(table::contains(&market.orders, lend_order_id), EOrderNotFound);
+        assert!(table::contains(&market.orders, borrow_order_id), EOrderNotFound);
+
+        let lend_order = table::remove(&mut market.orders, lend_order_id);
+        let borrow_order = table::remove(&mut market.orders, borrow_order_id);
+
+        assert!(lend_order.is_lend, EOrderNotFound);
+        assert!(!borrow_order.is_lend, EOrderNotFound);
+
+        assert!(borrow_order.interest_rate_bps >= lend_order.interest_rate_bps, ERateMismatch);
+        assert!(lend_order.duration_ms >= borrow_order.duration_ms, EDurationMismatch);
+        assert!(lend_order.amount == borrow_order.amount, EAmountMismatch);
+
+        let lend_balance = table::remove(&mut market.lend_balances, lend_order_id);
+        let loan_amount = balance::value(&lend_balance);
+        let asset_coin = coin::from_balance(lend_balance, ctx);
+        transfer::public_transfer(asset_coin, borrow_order.creator);
+
+        let collateral_balance = table::remove(&mut market.collateral_balances, borrow_order_id);
+        
+        // Calculate final rate (midpoint between lend and borrow rates)
+        let final_rate = (lend_order.interest_rate_bps + borrow_order.interest_rate_bps) / 2;
+
+        let loan = loan::create_loan<Asset, Collateral>(
+            borrow_order.creator,
+            lend_order.creator,
+            loan_amount,
+            final_rate,
+            clock::timestamp_ms(clock),
+            borrow_order.duration_ms,
+            collateral_balance,
+            ctx
+        );
+
+        transfer::public_transfer(loan, lend_order.creator);
+
+        market.active_orders = market.active_orders - 2;
+
+        event::emit(OrderMatched {
+            lend_order_id,
+            borrow_order_id,
+            amount: loan_amount,
+            duration: borrow_order.duration_ms,
+            final_rate,
+        });
+    }
+
+    #[test_only]
+    public fun match_orders_for_testing<Asset, Collateral>(
+        market: &mut Market<Asset, Collateral>,
+        lend_order_id: ID,
+        borrow_order_id: ID,
+        clock: &Clock,
+        ctx: &mut TxContext
+    ) {
+        match_orders_internal(market, lend_order_id, borrow_order_id, clock, ctx);
+    }
+
+    // ============== LIQUIDATION VIA DEEPBOOK ==============
+
+    /// Liquidate via DeepBook Swap using swap_exact_quantity
+    /// This function uses DeepBook V3's swap function for liquidation
+    public fun liquidate_via_deepbook<Asset, Collateral>(
         loan: loan::Loan<Asset, Collateral>,
-        _db_pool: &mut Pool<Collateral, Asset>,
-        _balance_mgr: &mut BalanceManager,
+        db_pool: &mut Pool<Collateral, Asset>,
+        deep_coin: Coin<DEEP>,
+        clock: &Clock,
+        ctx: &mut TxContext
+    ): (Coin<Asset>, Coin<Collateral>, Coin<DEEP>) {
+        // 1. Unwrap the defaulted loan
+        let (collateral_balance, total_debt, lender) = loan::unwrap_for_liquidation(loan, clock);
+        
+        // 2. Convert collateral to coin
+        let collateral_coin = coin::from_balance(collateral_balance, ctx);
+        
+        // 3. Swap collateral for asset using DeepBook V3
+        // swap_exact_quantity: base_in, quote_in, deep_in, min_out, clock, ctx
+        // We're selling collateral (base) for asset (quote)
+        let quote_in = coin::zero<Asset>(ctx);
+        
+        let (base_out, quote_out, deep_out) = db_pool::swap_exact_quantity(
+            db_pool,
+            collateral_coin,  // base_in (collateral to sell)
+            quote_in,         // quote_in (0, we're buying quote)
+            deep_coin,        // deep_in (for fees)
+            total_debt,       // min_out (minimum asset we need)
+            clock,
+            ctx
+        );
+
+        // 4. Verify we got enough to cover debt
+        let asset_received = coin::value(&quote_out);
+        assert!(asset_received >= total_debt, EInsufficientLiquidation);
+        
+        // 5. Split payment for lender
+        let mut quote_out_mut = quote_out;
+        let debt_payment = coin::split(&mut quote_out_mut, total_debt, ctx);
+        transfer::public_transfer(debt_payment, lender);
+        
+        // 6. Return remaining assets to liquidator
+        (quote_out_mut, base_out, deep_out)
+    }
+
+    /// Entry function for liquidation
+    public entry fun liquidate_and_swap<Asset, Collateral>(
+        loan: loan::Loan<Asset, Collateral>,
+        db_pool: &mut Pool<Collateral, Asset>,
+        deep_coin: Coin<DEEP>,
         clock: &Clock,
         ctx: &mut TxContext
     ) {
         let loan_id = object::id(&loan);
-        let (collateral_balance, total_debt, lender) = loan::unwrap_for_liquidation(loan, clock);
+        let (collateral_balance, total_debt, _) = loan::unwrap_for_liquidation(loan, clock);
         let collateral_amount = balance::value(&collateral_balance);
         
-        // Transfer collateral to liquidator
+        // Reconstruct the loan for the actual liquidation call
+        // Note: In production, you'd want to avoid double unwrapping
+        // For now, we'll handle this differently
+        
         let collateral_coin = coin::from_balance(collateral_balance, ctx);
-        transfer::public_transfer(collateral_coin, tx_context::sender(ctx));
+        let quote_in = coin::zero<Asset>(ctx);
+        
+        let (base_out, quote_out, deep_out) = db_pool::swap_exact_quantity(
+            db_pool,
+            collateral_coin,
+            quote_in,
+            deep_coin,
+            total_debt,
+            clock,
+            ctx
+        );
+
+        let asset_received = coin::value(&quote_out);
+        let profit = if (asset_received > total_debt) { asset_received - total_debt } else { 0 };
         
         event::emit(LoanLiquidated {
             loan_id,
             liquidator: tx_context::sender(ctx),
             collateral_sold: collateral_amount,
-            asset_received: total_debt, // Expected repayment
-            profit: 0, // Manual calculation needed
+            asset_received,
+            debt_repaid: total_debt,
+            profit,
         });
         
-        // Note: Lender address and debt amount emitted in event
-        // Liquidator should repay lender off-chain or via separate transaction
-        let _ = lender; // Suppress unused warning
+        // Transfer outputs to liquidator
+        let sender = tx_context::sender(ctx);
+        if (coin::value(&base_out) > 0) {
+            transfer::public_transfer(base_out, sender);
+        } else {
+            coin::destroy_zero(base_out);
+        };
+        transfer::public_transfer(quote_out, sender);
+        if (coin::value(&deep_out) > 0) {
+            transfer::public_transfer(deep_out, sender);
+        } else {
+            coin::destroy_zero(deep_out);
+        };
+    }
+
+    // ============== VIEW FUNCTIONS ==============
+
+    /// Get market statistics
+    public fun get_market_stats<Asset, Collateral>(market: &Market<Asset, Collateral>): (u64, u64, u64, u64) {
+        (
+            market.total_lend_volume,
+            market.total_borrow_volume,
+            market.total_vested_volume,
+            market.active_orders
+        )
+    }
+
+    /// Check if market is active
+    public fun is_market_active<Asset, Collateral>(market: &Market<Asset, Collateral>): bool {
+        market.is_active
+    }
+
+    /// Get order details
+    public fun get_order_info<Asset, Collateral>(
+        market: &Market<Asset, Collateral>,
+        order_id: ID
+    ): (address, u64, u64, u64, bool) {
+        let order = table::borrow(&market.orders, order_id);
+        (
+            order.creator,
+            order.amount,
+            order.interest_rate_bps,
+            order.duration_ms,
+            order.is_lend
+        )
+    }
+
+    // ============== ADMIN FUNCTIONS ==============
+
+    /// Pause market
+    public entry fun pause_market<Asset, Collateral>(
+        market: &mut Market<Asset, Collateral>,
+        _ctx: &mut TxContext
+    ) {
+        market.is_active = false;
+    }
+
+    /// Unpause market
+    public entry fun unpause_market<Asset, Collateral>(
+        market: &mut Market<Asset, Collateral>,
+        _ctx: &mut TxContext
+    ) {
+        market.is_active = true;
     }
 }

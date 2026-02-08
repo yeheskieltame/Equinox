@@ -10,16 +10,18 @@ module equinox::setup {
     fun init(otw: SETUP, ctx: &mut TxContext) {
         let publisher = package::claim(otw, ctx);
 
-        // 1. Setup Display for Loan
+        // 1. Setup Display for Loan (generic with SUI/SUI as example)
         let keys = vector[
             b"name".to_string(),
             b"description".to_string(),
             b"image_url".to_string(),
+            b"project_url".to_string(),
         ];
         let values = vector[
             b"Equinox Loan".to_string(),
-            b"A loan position in the Equinox Protocol".to_string(),
+            b"A lending position in the Equinox Protocol - Multi-collateral DeFi lending with DeepBook orderbook".to_string(),
             b"https://raw.githubusercontent.com/yeheskieltame/Equinox/refs/heads/main/equinox-interface/public/logo/Equinox.png".to_string(),
+            b"https://equinox.finance".to_string(),
         ];
         let mut display = display::new_with_fields<Loan<sui::sui::SUI, sui::sui::SUI>>(
             &publisher, keys, values, ctx
@@ -32,13 +34,14 @@ module equinox::setup {
             b"name".to_string(),
             b"description".to_string(),
             b"image_url".to_string(),
+            b"project_url".to_string(),
         ];
         let values_v = vector[
             b"Equinox Vested Position".to_string(),
-            b"Locked SUI tokens earning rewards".to_string(),
+            b"Locked tokens earning rewards - Use as collateral for priority lending".to_string(),
             b"https://raw.githubusercontent.com/yeheskieltame/Equinox/refs/heads/main/equinox-interface/public/logo/Equinox.png".to_string(),
+            b"https://equinox.finance".to_string(),
         ];
-        // Note: VestingPosition is not generic, so we don't need phantom types here
         let mut display_v = display::new_with_fields<VestingPosition>(
             &publisher, keys_v, values_v, ctx
         );
