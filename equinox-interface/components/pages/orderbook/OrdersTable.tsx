@@ -58,6 +58,9 @@ export function OrdersTable({ orders, title, onCancel, emptyMessage = "No orders
                 LTV
               </th>
               <th className="px-6 py-4 text-left text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
+                Creator
+              </th>
+              <th className="px-6 py-4 text-left text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
                 Term
               </th>
               <th className="px-6 py-4 text-left text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">
@@ -137,6 +140,11 @@ export function OrdersTable({ orders, title, onCancel, emptyMessage = "No orders
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className="text-sm text-[hsl(var(--foreground))]">
                     {formatPercentage(order.ltv)}
+                  </span>
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <span className="font-mono text-xs text-[hsl(var(--muted-foreground))]">
+                    {order.creator ? `${order.creator.slice(0, 6)}...${order.creator.slice(-4)}` : "—"}
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">

@@ -1,1 +1,1 @@
-export { SuiProvider, useWallet } from "./SuiProvider";
+export { SuiProvider, useWallet, useWalletContext } from "./SuiProvider";

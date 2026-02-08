@@ -46,63 +46,159 @@ function isValidSuiAddress(address: string): boolean {
  * In real mode: Queries blockchain for Order objects, returns empty if none found
  * In mock mode: Returns mock orders
  */
+/**
+ * Fetch orders from blockchain
+ * In real mode: Queries blockchain for Order objects from Market table
+ * In mock mode: Returns mock orders
+ */
 export async function fetchBlockchainOrders(userAddress: string): Promise<Order[]> {
   if (isMockMode()) {
     await delay(500);
     return mockOrders;
   }
 
-  // Real mode - fetch from blockchain only
-  if (!userAddress || !isValidSuiAddress(userAddress)) {
-    console.warn("Invalid or empty user address");
-    return [];
-  }
-
   try {
     const client = getSuiClient();
-    const packageId = env.sui.packageId;
+    const marketId = env.sui.marketId;
     
-    if (!packageId) {
-      console.warn("Package ID not configured");
+    if (!marketId) {
+      console.warn("Market ID not configured");
       return [];
     }
 
-    // Query Order objects from market module
-    const objects = await client.getOwnedObjects({
-      owner: userAddress,
-      filter: {
-        StructType: `${packageId}::market::Order`,
-      },
-      options: {
-        showContent: true,
-        showType: true,
-      },
+    // 1. Fetch Market object to get orders Table ID
+    const marketObj = await client.getObject({
+      id: marketId,
+      options: { showContent: true },
     });
 
-    if (objects.data.length === 0) {
+    if (marketObj.data?.content?.dataType !== "moveObject") {
+      console.warn("Invalid market object");
       return [];
     }
 
-    return objects.data.map((obj) => {
-      const content = obj.data?.content;
-      if (content?.dataType !== "moveObject") return null;
-      
-      const fields = content.fields as Record<string, unknown>;
-      return {
-        id: obj.data?.objectId || "",
-        type: fields.is_lend ? "lend" : "borrow",
-        asset: String(fields.asset || "USDC"),
-        amount: Number(fields.amount || 0) / 1_000_000_000,
-        interestRate: Number(fields.interest_rate || 0) / 100,
-        ltv: Number(fields.ltv || 0) / 100,
-        term: Number(fields.term || 0) / (24 * 60 * 60),
-        status: String(fields.status || "pending") as Order["status"],
-        createdAt: new Date(Number(fields.created_at || 0)).toISOString(),
-        isHidden: Boolean(fields.is_hidden),
-        fairnessScore: Number(fields.fairness_score || 0),
-        zkProofHash: fields.zk_proof_hash ? String(fields.zk_proof_hash) : undefined,
-      } as Order;
-    }).filter(Boolean) as Order[];
+    const marketFields = marketObj.data.content.fields as any;
+    // Market struct has 'orders' field which is a Table<ID, Order>
+    // Table struct has 'id' field which is UID
+    const ordersTableId = marketFields.orders?.fields?.id?.id;
+
+    if (!ordersTableId) {
+      console.warn("Could not find orders table ID");
+      return [];
+    }
+
+    // 2. Fetch dynamic fields from orders table
+    // Fetching up to 50 active orders for MVP
+    const dynamicFields = await client.getDynamicFields({
+      parentId: ordersTableId,
+      limit: 50,
+    });
+
+    if (dynamicFields.data.length === 0) {
+      return [];
+    }
+
+    // 3. Fetch each order content
+    const orderPromises = dynamicFields.data.map(async (field) => {
+      try {
+        const orderObj = await client.getDynamicFieldObject({
+          parentId: ordersTableId,
+          name: field.name,
+        });
+
+        if (orderObj.data?.content?.dataType !== "moveObject") return null;
+
+        // In a Table<K,V>, the dynamic field object has a 'value' field containing the V
+        const value = (orderObj.data.content.fields as any).value;
+        const fields = value.fields;
+
+        // Order ID parsing (robust handling for RPC variations)
+        let orderId = field.name.value;
+        
+        // Handle ID struct wrapper { bytes: ... } or { id: ... }
+        if (typeof orderId === 'object' && orderId !== null) {
+            if ('bytes' in orderId) orderId = orderId.bytes;
+            else if ('id' in orderId) orderId = orderId.id;
+        }
+
+        // Handle Base64 string (if parsed as string but not hex)
+        // 44 chars is typical for Base64 encoded 32-byte address
+        if (typeof orderId === 'string' && !orderId.startsWith('0x') && orderId.length > 32) {
+             try {
+                // Use Buffer if available (Node), else atob (Browser)
+                let binString = '';
+                if (typeof Buffer !== 'undefined') {
+                    binString = Buffer.from(orderId, 'base64').toString('binary');
+                } else if (typeof window !== 'undefined') {
+                    binString = window.atob(orderId);
+                }
+                
+                if (binString) {
+                    // Convert binary string to hex
+                    const hex = Array.from(binString).map((c) => 
+                        (c as string).charCodeAt(0).toString(16).padStart(2, '0')
+                    ).join('');
+                    orderId = '0x' + hex;
+                }
+             } catch(e) {
+                console.warn("Failed to decode ID:", orderId, e);
+             }
+        }
+
+        return {
+          id: orderId,
+          creator: fields.creator, // Add creator field to Order type if missing or use it for filtering
+          type: fields.is_lend ? "lend" : "borrow",
+          asset: "USDC", // MVP hardcoded asset (Market<MOCK_USDC, SUI>)
+          amount: Number(fields.amount || 0) / 1_000_000_000, // Assuming 9 decimals for now, wait check asset
+          // MOCK_USDC is 6 decimals!
+          // But our Market<Asset, Collateral>
+          // BuildTx uses 6 decimals for USDC.
+          // So if asset is USDC, divide by 1_000_000
+          // But wait, the frontend expects 'amount' in human readable
+          
+          interestRate: Number(fields.interest_rate_bps || 0) / 100,
+          ltv: 0.7, // Order struct doesn't have LTV field! It's implied. Mocking 70% for display.
+          // Or calculate from collateral_price / asset_price if available?
+          // Actually place_borrow_order takes collateral amount but Order struct doesn't store it explicitly?
+          // Wait, Order struct: collateral_price, asset_price.
+          // But for Lend Order: price is meaningless?
+          // For Borrow Order: amount is amount_requested (Asset). 
+          // Collateral is stored in `collateral_balances` Table<ID, Balance<Collateral>> separately!
+          
+          term: Number(fields.duration_ms || 0) / (24 * 60 * 60 * 1000),
+          status: "pending", // All orders in table are pending/active
+          createdAt: new Date(Number(fields.created_at || 0)).toISOString(),
+          isHidden: false, // Table 'orders' is for public orders
+          fairnessScore: 85, // Mock score as it's not stored in Order struct (only in VestedBorrowOrder)
+          zkProofHash: undefined,
+        } as Order;
+      } catch (e) {
+        console.warn("Error fetching order detail:", e);
+        return null;
+      }
+    });
+
+    const results = await Promise.all(orderPromises);
+    
+    // Filter out nulls and fix asset decimals
+    return results.filter(Boolean).map(order => {
+        if (order) {
+            // Fix amount decimals: USDC = 6
+             // Previously we divided by 1e9, need to adjust
+             order.amount = order.amount * 1000; // 1e9 -> 1e6 adjustment
+             // Wait, logic above divided by 1e9.
+             // If on chain is 1e6 (USDC), then dividing by 1e9 results in 0.001 * actual.
+             // So we need to multiply by 1000 to get back to correct human readable if we assumed 1e9.
+             // Better logic:
+             // OnChain: 5000000 (5 USDC)
+             // Code: 5000000 / 1e9 = 0.005
+             // Correct: 5000000 / 1e6 = 5
+             // So 0.005 * 1000 = 5. Correct.
+        }
+        return order;
+    }) as Order[];
+
   } catch (error) {
     console.error("Error fetching orders from blockchain:", error);
     return [];
@@ -560,14 +656,28 @@ export async function fetchUserCoins(userAddress: string, coinType?: string): Pr
       coinType: coinType,
     });
 
+    // Determine decimals based on coin type
+    const decimals = getDecimalsForCoinType(coinType);
+    const divisor = Math.pow(10, decimals);
+
     return coins.data.map((coin) => ({
       objectId: coin.coinObjectId,
-      balance: Number(coin.balance) / 1_000_000_000,
+      balance: Number(coin.balance) / divisor,
     }));
   } catch (error) {
     console.error("Error fetching user coins:", error);
     return [];
   }
+}
+
+/**
+ * Get decimals for coin type
+ */
+function getDecimalsForCoinType(coinType?: string): number {
+  if (!coinType) return 9; // Default to SUI decimals
+  if (coinType.includes("mock_usdc") || coinType.includes("MOCK_USDC")) return 6;
+  if (coinType.includes("mock_eth") || coinType.includes("MOCK_ETH")) return 8;
+  return 9; // SUI and default
 }
 
 /**
@@ -577,11 +687,26 @@ export function getCoinType(asset: string): string {
   const packageId = env.sui.packageId;
   switch (asset) {
     case "USDC":
-      return `${packageId}::mock_coins::MOCK_USDC`;
+      return `${packageId}::mock_usdc::MOCK_USDC`;
     case "ETH":
-      return `${packageId}::mock_coins::MOCK_ETH`;
+      return `${packageId}::mock_eth::MOCK_ETH`;
     case "SUI":
     default:
       return "0x2::sui::SUI";
+  }
+}
+
+/**
+ * Get decimals for asset
+ */
+export function getDecimalsForAsset(asset: string): number {
+  switch (asset) {
+    case "USDC":
+      return 6;
+    case "ETH":
+      return 8;
+    case "SUI":
+    default:
+      return 9;
   }
 }

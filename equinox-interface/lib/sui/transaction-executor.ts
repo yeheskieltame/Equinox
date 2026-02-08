@@ -1,17 +1,6 @@
 import { Transaction } from "@mysten/sui/transactions";
-import { getZkLoginSignature } from "@mysten/sui/zklogin";
-import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { getSuiClient } from "@/lib/sui/client";
 import { isMockMode } from "@/lib/config";
-import { 
-  getStoredKeyPair, 
-  getStoredJwt, 
-  getStoredZkProof, 
-  getStoredSalt,
-  getStoredSession,
-  deriveZkLoginAddress,
-  type ZkProof,
-} from "@/lib/sui/zklogin";
 import {
   buildCreateOrderTx,
   buildLockVestingTx,
@@ -20,6 +9,7 @@ import {
   buildCreateBorrowTx,
   buildRepayLoanTx,
   buildMintTokenTx,
+  buildMatchOrdersTx,
 } from "@/lib/sui/transactions";
 
 export interface TransactionResult {
@@ -33,6 +23,15 @@ export interface TransactionResult {
       storageCost: string;
     };
   };
+}
+
+// This will be set by the component that has access to dapp-kit hooks
+let signAndExecuteCallback: ((tx: Transaction) => Promise<{ digest: string; effects?: unknown }>) | null = null;
+
+export function setSignAndExecuteCallback(
+  callback: ((tx: Transaction) => Promise<{ digest: string; effects?: unknown }>) | null
+) {
+  signAndExecuteCallback = callback;
 }
 
 async function executeTransaction(tx: Transaction, userAddress: string): Promise<TransactionResult> {
@@ -51,82 +50,23 @@ async function executeTransaction(tx: Transaction, userAddress: string): Promise
     };
   }
 
-  const client = getSuiClient();
-  const keypair = getStoredKeyPair();
-  const jwt = getStoredJwt();
-  const proof = getStoredZkProof();
-  const salt = getStoredSalt();
-  const session = getStoredSession();
-
-  if (!keypair || !jwt || !salt || !session?.maxEpoch || !session?.randomness) {
+  if (!signAndExecuteCallback) {
     return {
       success: false,
-      error: "Missing authentication data. Please reconnect your wallet.",
+      error: "Wallet not connected. Please connect your wallet first.",
     };
   }
 
   try {
-    const derivedAddress = await deriveZkLoginAddress(jwt, salt);
-    if (derivedAddress !== userAddress) {
-       console.error(`Address Mismatch! stored=${derivedAddress}, txSender=${userAddress}`);
-       return {
-         success: false,
-         error: "Session State Mismatch: Derived address does not match sender. Please log out and log in again."
-       };
-    }
-
     tx.setSender(userAddress);
     
-    const { bytes, signature: userSignature } = await tx.sign({
-      client,
-      signer: keypair,
-    });
+    const result = await signAndExecuteCallback(tx);
 
-    if (proof) {
-      // Use the raw salt string as addressSeed to ensure it matches exactly what was used
-      // in jwtToAddress during address derivation.
-      // addressSeed: BigInt(salt).toString() caused mismatch if salt had leading zeros.
-      const addressSeed = salt;
-      
-      const zkLoginSignature = getZkLoginSignature({
-        inputs: {
-          ...proof,
-          addressSeed,
-        },
-        maxEpoch: session.maxEpoch,
-        userSignature,
-      });
-
-      const result = await client.executeTransactionBlock({
-        transactionBlock: bytes,
-        signature: zkLoginSignature,
-        options: {
-          showEffects: true,
-          showEvents: true,
-        },
-      });
-
-      return {
-        success: result.effects?.status?.status === "success",
-        digest: result.digest,
-        effects: result.effects as TransactionResult["effects"],
-      };
-    } else {
-      const result = await client.executeTransactionBlock({
-        transactionBlock: bytes,
-        signature: userSignature,
-        options: {
-          showEffects: true,
-          showEvents: true,
-        },
-      });
-
-      return {
-        success: result.effects?.status?.status === "success",
-        digest: result.digest,
-        effects: result.effects as TransactionResult["effects"],
-      };
-    }
+    return {
+      success: true,
+      digest: result.digest,
+      effects: result.effects as TransactionResult["effects"],
+    };
   } catch (error) {
     console.error("Transaction execution error:", error);
     return {
@@ -145,6 +85,8 @@ export async function executeCreateOrder(
     ltv: number;
     term: number;
     isHidden: boolean;
+    coinObjectId?: string;
+    collateralAmount?: number;
   },
   userAddress: string
 ): Promise<TransactionResult> {
@@ -217,11 +159,17 @@ export async function executeBorrow(
     borrowAsset: string;
     borrowAmount: number;
     ltv: number;
+    interestRate?: number;
+    term?: number;
   },
   userAddress: string
 ): Promise<TransactionResult> {
   try {
-    const tx = buildCreateBorrowTx(params);
+    const tx = buildCreateBorrowTx({
+      ...params,
+      interestRate: params.interestRate || 5.0,
+      term: params.term || 30,
+    });
     return await executeTransaction(tx, userAddress);
   } catch (error) {
     return {
@@ -279,74 +227,49 @@ export async function executeDemoTransaction(userAddress: string): Promise<Trans
     };
   }
 
-  try {
-    const client = getSuiClient();
-    const keypair = getStoredKeyPair();
-    
-    if (!keypair) {
-      return {
-        success: false,
-        error: "No keypair found. Please reconnect your wallet.",
-      };
-    }
+  if (!signAndExecuteCallback) {
+    return {
+      success: false,
+      error: "Wallet not connected. Please connect your wallet first.",
+    };
+  }
 
+  try {
     const tx = new Transaction();
     tx.setSender(userAddress);
     
     const [coin] = tx.splitCoins(tx.gas, [1]);
     tx.transferObjects([coin], userAddress);
 
-    const session = getStoredSession();
-    const proof = getStoredZkProof();
-    
-    const { bytes, signature: userSignature } = await tx.sign({
-      client,
-      signer: keypair,
-    });
+    const result = await signAndExecuteCallback(tx);
 
-    if (proof && session?.maxEpoch) {
-      const zkLoginSignature = getZkLoginSignature({
-        inputs: {
-          ...proof,
-          addressSeed: proof.addressSeed,
-        },
-        maxEpoch: session.maxEpoch,
-        userSignature,
-      });
-
-      const result = await client.executeTransactionBlock({
-        transactionBlock: bytes,
-        signature: zkLoginSignature,
-        options: {
-          showEffects: true,
-        },
-      });
-
-      return {
-        success: result.effects?.status?.status === "success",
-        digest: result.digest,
-        effects: result.effects as TransactionResult["effects"],
-      };
-    } else {
-      const result = await client.executeTransactionBlock({
-        transactionBlock: bytes,
-        signature: userSignature,
-        options: {
-          showEffects: true,
-        },
-      });
-
-      return {
-        success: result.effects?.status?.status === "success",
-        digest: result.digest,
-        effects: result.effects as TransactionResult["effects"],
-      };
-    }
+    return {
+      success: true,
+      digest: result.digest,
+      effects: result.effects as TransactionResult["effects"],
+    };
   } catch (error) {
     console.error("Demo transaction error:", error);
     return {
       success: false,
       error: error instanceof Error ? error.message : "Demo transaction failed",
+    };
+  }
+}
+
+export async function executeMatchOrders(
+  lendOrderId: string,
+  borrowOrderId: string,
+  asset: string,
+  userAddress: string
+): Promise<TransactionResult> {
+  try {
+    const tx = buildMatchOrdersTx(lendOrderId, borrowOrderId, asset);
+    return await executeTransaction(tx, userAddress);
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to create match orders transaction",
     };
   }
 }

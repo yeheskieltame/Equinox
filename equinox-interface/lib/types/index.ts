@@ -6,6 +6,7 @@ export type VestingStatus = "locked" | "unlockable" | "unlocked";
 
 export interface Order {
   id: string;
+  creator?: string;
   type: OrderType;
   asset: string;
   amount: number;

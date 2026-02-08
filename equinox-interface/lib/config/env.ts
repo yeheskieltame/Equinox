@@ -8,6 +8,7 @@ export interface EnvConfig {
     packageId: string;
     registryId: string;
     vestingVaultId: string;
+    marketId: string;
     usdcAdminCapId?: string;
     ethAdminCapId?: string;
     // Legacy aliases
@@ -18,6 +19,7 @@ export interface EnvConfig {
   zkLogin: {
     googleClientId: string;
     redirectUrl: string;
+    enokiApiKey: string;
   };
   priceOracle: "pyth" | "supra";
   features: {
@@ -35,6 +37,7 @@ export const env: EnvConfig = {
     packageId: process.env.NEXT_PUBLIC_PACKAGE_ID || "",
     registryId: process.env.NEXT_PUBLIC_REGISTRY_ID || "",
     vestingVaultId: process.env.NEXT_PUBLIC_VESTING_VAULT_ID || "",
+    marketId: process.env.NEXT_PUBLIC_MARKET_ID || "",
     // New optional admin caps for faucet
     usdcAdminCapId: process.env.NEXT_PUBLIC_USDC_ADMIN_CAP_ID || "",
     ethAdminCapId: process.env.NEXT_PUBLIC_ETH_ADMIN_CAP_ID || "",
@@ -46,6 +49,7 @@ export const env: EnvConfig = {
   zkLogin: {
     googleClientId: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID || "",
     redirectUrl: process.env.NEXT_PUBLIC_REDIRECT_URL || "http://localhost:3000/auth/callback",
+    enokiApiKey: process.env.NEXT_PUBLIC_ENOKI_API_KEY || "",
   },
   priceOracle: (process.env.NEXT_PUBLIC_PRICE_ORACLE as "pyth" | "supra") || "pyth",
   features: {

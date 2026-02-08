@@ -13,14 +13,19 @@ export default function DashboardPage() {
     stats,
     marketExposure,
     apyHistory,
+    positions,
     isLoadingMarket,
     fetchMarketData,
+    fetchPositions,
     user,
   } = useAppStore();
 
   useEffect(() => {
     fetchMarketData();
-  }, [fetchMarketData]);
+    if (user?.isConnected) {
+      fetchPositions();
+    }
+  }, [fetchMarketData, fetchPositions, user?.isConnected]);
 
   return (
     <div className="min-h-screen bg-[hsl(var(--background))]">
@@ -161,6 +166,56 @@ export default function DashboardPage() {
             <DepositPanel asset="USDC" balance={0} apy={stats.averageApy} />
           </div>
         </div>
+
+        {user?.isConnected && positions.length > 0 && (
+          <div className="mt-12">
+            <h2 className="text-xl font-semibold mb-6 text-[hsl(var(--foreground))]">Your Active Positions</h2>
+            <div className="bg-[hsl(var(--card))] rounded-2xl border border-[hsl(var(--border))] overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-[hsl(var(--border))] bg-[hsl(var(--secondary))]/20">
+                      <th className="px-6 py-4 text-left text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Type</th>
+                      <th className="px-6 py-4 text-left text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Asset</th>
+                      <th className="px-6 py-4 text-left text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Amount</th>
+                      <th className="px-6 py-4 text-left text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Rate</th>
+                      <th className="px-6 py-4 text-left text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {positions.map((pos) => (
+                      <tr key={pos.id} className="border-b border-[hsl(var(--border))] last:border-b-0 hover:bg-[hsl(var(--secondary))]/10 transition-colors">
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                            pos.type === 'lending' 
+                              ? 'bg-[hsl(var(--success))]/10 text-[hsl(var(--success))]' 
+                              : 'bg-[hsl(var(--warning))]/10 text-[hsl(var(--warning))]'
+                          }`}>
+                            {pos.type === 'lending' ? 'Lend' : 'Borrow'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-[hsl(var(--foreground))]">
+                          {pos.asset}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-[hsl(var(--foreground))]">
+                          ${formatNumber(pos.amount)}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-[hsl(var(--primary))] font-medium">
+                          {pos.interestRate}%
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <span className="text-sm capitalize text-[hsl(var(--muted-foreground))]">
+                            {pos.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="mt-12">
           {isLoadingMarket ? (

@@ -17,7 +17,7 @@ import {
 import { Plus, EyeOff, Shield, Zap, ExternalLink, TrendingUp, TrendingDown } from "lucide-react";
 import { toast } from "sonner";
 import type { Order } from "@/lib/types";
-import { executeCreateOrder } from "@/lib/sui/transaction-executor";
+import { executeCreateOrder, executeMatchOrders } from "@/lib/sui/transaction-executor";
 import { calculateFairnessScore } from "@/lib/sui/blockchain-service";
 import { isMockMode, env } from "@/lib/config";
 import { formatNumber } from "@/lib/utils/format";
@@ -29,6 +29,7 @@ export default function OrderbookPage() {
   const [orderType, setOrderType] = useState<"lend" | "borrow">("lend");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isMatching, setIsMatching] = useState(false);
   const [lastTxDigest, setLastTxDigest] = useState<string | null>(null);
 
   useEffect(() => {
@@ -62,6 +63,8 @@ export default function OrderbookPage() {
     ltv: number;
     term: number;
     isHidden: boolean;
+    coinObjectId?: string;
+    collateralAmount?: number;
   }) => {
     if (!isConnected || !address) {
       toast.error("Please connect your wallet first");
@@ -179,6 +182,79 @@ export default function OrderbookPage() {
     }
   };
 
+  const handleMatchOrders = async () => {
+    if (!address) return;
+    setIsMatching(true);
+    toast.loading("Finding matching orders...");
+
+    try {
+      const pendingLends = orders.filter((o) => o.type === "lend" && o.status === "pending");
+      const pendingBorrows = orders.filter((o) => o.type === "borrow" && o.status === "pending");
+
+      if (pendingLends.length === 0 || pendingBorrows.length === 0) {
+        toast.dismiss();
+        toast.info("Not enough orders to match");
+        return;
+      }
+
+      let match = null;
+      // Simple logic: find first overlap where borrow rate >= lend rate
+      for (const lend of pendingLends) {
+        for (const borrow of pendingBorrows) {
+          if (lend.asset === borrow.asset && borrow.interestRate >= lend.interestRate) {
+            match = { lend, borrow };
+            break;
+          }
+        }
+        if (match) break;
+      }
+
+      if (!match) {
+        toast.dismiss();
+        toast.info("No matching price overlap found.");
+        return;
+      }
+
+      toast.dismiss();
+      toast.info("Match found! Executing...");
+
+      const result = await executeMatchOrders(
+        match.lend.id,
+        match.borrow.id,
+        match.lend.asset,
+        address
+      );
+
+      if (result.success) {
+        setLastTxDigest(result.digest || null);
+        toast.success(
+          <div className="flex flex-col gap-1">
+            <span>Orders matched successfully!</span>
+            {result.digest && (
+              <a
+                href={`https://suiscan.xyz/testnet/tx/${result.digest}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-400 hover:underline flex items-center gap-1"
+              >
+                View transaction <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+          </div>
+        );
+        // Wait a bit for indexing then refresh
+        setTimeout(() => fetchOrders(), 2000);
+      } else {
+        toast.error(`Match failed: ${result.error}`);
+      }
+    } catch (error) {
+      console.error("Match error:", error);
+      toast.error("Failed to execute match");
+    } finally {
+      setIsMatching(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[hsl(var(--background))]">
       <Navbar />
@@ -194,8 +270,19 @@ export default function OrderbookPage() {
                 <h1 className="text-4xl font-semibold text-[hsl(var(--foreground))]">Order</h1>
                 <span className="text-4xl font-semibold text-[hsl(var(--muted-foreground))]">Book</span>
               </div>
-              
-              <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+              <div className="flex items-center gap-2">
+                {address && (
+                  <Button 
+                    variant="outline" 
+                    onClick={handleMatchOrders} 
+                    disabled={isMatching}
+                    className="cursor-pointer border-[hsl(var(--primary))/20] text-[hsl(var(--primary))] hover:bg-[hsl(var(--primary))/10]"
+                  >
+                    <Zap className={`w-4 h-4 mr-2 ${isMatching ? 'animate-spin' : ''}`} />
+                    {isMatching ? "Matching..." : "Auto-Match"}
+                  </Button>
+                )}
+                <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                 <DialogTrigger asChild>
                   <Button className="cursor-pointer bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/90">
                     <Plus className="w-4 h-4 mr-2" />
@@ -228,6 +315,7 @@ export default function OrderbookPage() {
                   </Tabs>
                 </DialogContent>
               </Dialog>
+              </div>
             </div>
 
             <div className="flex items-center gap-3 mb-4">

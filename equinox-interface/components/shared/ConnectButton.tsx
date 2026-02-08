@@ -1,6 +1,10 @@
 "use client";
 
-import { useWallet } from "@/components/providers";
+import { 
+  ConnectButton as DappKitConnectButton,
+  useCurrentAccount,
+  useDisconnectWallet,
+} from "@mysten/dapp-kit";
 import { useAppStore } from "@/lib/store";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,9 +14,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Loader2, Wallet, Copy, LogOut, ExternalLink } from "lucide-react";
+import { Wallet, Copy, LogOut, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { useSuiClient } from "@mysten/dapp-kit";
+import { isMockMode } from "@/lib/config";
 
 function formatAddress(address: string): string {
   if (address.length <= 12) return address;
@@ -20,19 +26,48 @@ function formatAddress(address: string): string {
 }
 
 export function ConnectButton() {
-  const { isConnected, address, suiBalance, isConnecting, connect, disconnect } = useWallet();
+  const account = useCurrentAccount();
+  const { mutate: disconnect } = useDisconnectWallet();
+  const suiClient = useSuiClient();
   const { connectWallet, disconnectWallet, user } = useAppStore();
+  const [suiBalance, setSuiBalance] = useState(0);
 
+  // Fetch balance when connected
   useEffect(() => {
-    if (isConnected && address && !user?.isConnected) {
-      connectWallet();
-    }
-  }, [isConnected, address, user?.isConnected, connectWallet]);
+    const fetchBalance = async () => {
+      if (!account?.address) {
+        setSuiBalance(0);
+        return;
+      }
+      
+      if (isMockMode()) {
+        setSuiBalance(50000);
+        return;
+      }
 
-  const handleConnect = async () => {
-    await connect();
-    await connectWallet();
-  };
+      try {
+        const balance = await suiClient.getBalance({
+          owner: account.address,
+          coinType: "0x2::sui::SUI",
+        });
+        setSuiBalance(Number(balance.totalBalance) / 1_000_000_000);
+      } catch (error) {
+        console.error("Failed to fetch balance:", error);
+        setSuiBalance(0);
+      }
+    };
+
+    fetchBalance();
+  }, [account?.address, suiClient]);
+
+  // Sync with app store
+  useEffect(() => {
+    if (account?.address && !user?.isConnected) {
+      connectWallet();
+    } else if (!account?.address && user?.isConnected) {
+      disconnectWallet();
+    }
+  }, [account?.address, user?.isConnected, connectWallet, disconnectWallet]);
 
   const handleDisconnect = () => {
     disconnect();
@@ -41,19 +76,19 @@ export function ConnectButton() {
   };
 
   const copyAddress = () => {
-    if (address) {
-      navigator.clipboard.writeText(address);
+    if (account?.address) {
+      navigator.clipboard.writeText(account.address);
       toast.success("Address copied to clipboard");
     }
   };
 
   const openExplorer = () => {
-    if (address) {
-      window.open(`https://suiscan.xyz/testnet/account/${address}`, "_blank");
+    if (account?.address) {
+      window.open(`https://suiscan.xyz/testnet/account/${account.address}`, "_blank");
     }
   };
 
-  if (isConnected && address) {
+  if (account?.address) {
     return (
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -62,7 +97,7 @@ export function ConnectButton() {
             className="cursor-pointer h-9 px-4 rounded-full text-sm border-[hsl(var(--border))] bg-[hsl(var(--secondary))]/50 hover:bg-[hsl(var(--secondary))]"
           >
             <Wallet className="w-4 h-4 mr-2" />
-            {formatAddress(address)}
+            {formatAddress(account.address)}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
@@ -103,23 +138,15 @@ export function ConnectButton() {
     );
   }
 
+  // Use dapp-kit's built-in connect button with custom styling
   return (
-    <Button
-      onClick={handleConnect}
-      disabled={isConnecting}
-      className="cursor-pointer h-9 px-4 rounded-full text-sm bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] hover:bg-[hsl(var(--primary))]/90"
-    >
-      {isConnecting ? (
-        <>
-          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-          Connecting...
-        </>
-      ) : (
+    <DappKitConnectButton 
+      connectText={
         <>
           <Wallet className="w-4 h-4 mr-2" />
           Connect Wallet
         </>
-      )}
-    </Button>
+      }
+    />
   );
 }

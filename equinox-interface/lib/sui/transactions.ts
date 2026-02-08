@@ -4,11 +4,18 @@ import { env } from "@/lib/config";
 interface CreateOrderParams {
   type: "lend" | "borrow";
   asset: string;
+  collateral?: string;
   amount: number;
   interestRate: number;
-  ltv: number;
+  ltv?: number;
   term: number;
   isHidden: boolean;
+  // Required for non-SUI lending
+  coinObjectId?: string;
+  // Required for borrow orders
+  collateralAmount?: number;
+  collateralPrice?: number;
+  assetPrice?: number;
 }
 
 interface DepositToVaultParams {
@@ -21,7 +28,11 @@ interface CreateBorrowParams {
   collateralCoinId: string;
   borrowAsset: string;
   borrowAmount: number;
+  interestRate: number;
+  term: number;
   ltv: number;
+  collateralPrice?: number;
+  assetPrice?: number;
 }
 
 interface LockVestingParams {
@@ -35,48 +46,253 @@ const getRegistryId = () => env.sui.registryId;
 const getVestingVaultId = () => env.sui.vestingVaultId;
 const getPackageId = () => env.sui.packageId;
 
-export function buildCreateOrderTx(params: CreateOrderParams): Transaction {
+// Market IDs for different pairs
+const getMarketId = (asset: string, collateral: string) => {
+  const marketId = env.sui.marketId;
+  // For MVP, we use configured market ID
+  // In production, this would be fetched from registry per asset/collateral pair
+  if (!marketId) {
+    throw new Error(
+      `Market ID not configured. To use orderbook, you need to create a Market object first:\n\n` +
+      `1. Run: sui client call --package ${env.sui.packageId} --module market ` +
+      `--function create_market_standalone --type-args "${env.sui.packageId}::mock_usdc::MOCK_USDC" "0x2::sui::SUI" ` +
+      `--args '[]' --gas-budget 50000000\n\n` +
+      `2. Copy the created Market object ID from the transaction output\n` +
+      `3. Add to .env.local: NEXT_PUBLIC_MARKET_ID=<object_id>`
+    );
+  }
+  return marketId;
+};
+
+// Helper to get coin type argument based on asset
+function getAssetCoinType(asset: string, packageId: string): string {
+  switch (asset) {
+    case "USDC":
+      return `${packageId}::mock_usdc::MOCK_USDC`;
+    case "ETH":
+      return `${packageId}::mock_eth::MOCK_ETH`;
+    case "SUI":
+    default:
+      return "0x2::sui::SUI";
+  }
+}
+
+// Helper to get decimals for asset
+function getDecimals(asset: string): number {
+  switch (asset) {
+    case "USDC":
+      return 6;
+    case "ETH":
+      return 8;
+    case "SUI":
+    default:
+      return 9;
+  }
+}
+
+// Convert amount to smallest unit
+function toSmallestUnit(amount: number, asset: string): bigint {
+  const decimals = getDecimals(asset);
+  return BigInt(Math.floor(amount * Math.pow(10, decimals)));
+}
+
+/**
+ * Build a lend order transaction
+ * Matches: place_lend_order<Asset, Collateral>(market, payment, interest_rate_bps, duration_ms, clock, ctx)
+ */
+export function buildLendOrderTx(params: {
+  asset: string;
+  collateral: string;
+  amount: number;
+  interestRate: number;
+  term: number;
+  coinObjectId: string;
+}): Transaction {
   const tx = new Transaction();
   const packageId = getPackageId();
-  const registryId = getRegistryId();
+  const marketId = getMarketId(params.asset, params.collateral);
 
-  if (!packageId) {
-    throw new Error("Package ID not configured");
-  }
+  if (!packageId) throw new Error("Package ID not configured");
+  if (!marketId) throw new Error("Market ID not configured");
 
-  const amountInMist = BigInt(params.amount * 1_000_000_000);
   const interestRateBps = Math.floor(params.interestRate * 100);
-  const ltvBps = Math.floor(params.ltv * 100);
-  const termSeconds = params.term * 24 * 60 * 60;
+  const durationMs = params.term * 24 * 60 * 60 * 1000;
 
-  // Using the market module for order creation
   tx.moveCall({
     target: `${packageId}::market::place_lend_order`,
-    typeArguments: getAssetTypeArg(params.asset, packageId),
+    typeArguments: [
+      getAssetCoinType(params.asset, packageId),
+      getAssetCoinType(params.collateral, packageId),
+    ],
     arguments: [
-      tx.object(registryId),
-      tx.pure.u64(amountInMist),
+      tx.object(marketId),
+      tx.object(params.coinObjectId),
       tx.pure.u64(interestRateBps),
-      tx.pure.u64(ltvBps),
-      tx.pure.u64(termSeconds),
-      tx.pure.bool(params.isHidden),
+      tx.pure.u64(durationMs),
+      tx.object("0x6"), // Clock object
     ],
   });
 
   return tx;
 }
 
-// Helper to get coin type argument based on asset
-function getAssetTypeArg(asset: string, packageId: string): string[] {
-  switch (asset) {
-    case "USDC":
-      return [`${packageId}::mock_usdc::MOCK_USDC`];
-    case "ETH":
-      return [`${packageId}::mock_eth::MOCK_ETH`];
-    case "SUI":
-    default:
-      return ["0x2::sui::SUI"];
+/**
+ * Build a borrow order transaction (standalone - no registry validation)
+ * Matches: place_borrow_order_standalone<Asset, Collateral>(market, collateral, amount, interest_rate_bps, duration_ms, clock, ctx)
+ */
+export function buildBorrowOrderTx(params: {
+  asset: string;
+  collateral: string;
+  borrowAmount: number;
+  interestRate: number;
+  term: number;
+  collateralCoinId: string;
+}): Transaction {
+  const tx = new Transaction();
+  const packageId = getPackageId();
+  const marketId = getMarketId(params.asset, params.collateral);
+
+  if (!packageId) throw new Error("Package ID not configured");
+  if (!marketId) throw new Error("Market ID not configured");
+
+  const amountInSmallest = toSmallestUnit(params.borrowAmount, params.asset);
+  const interestRateBps = Math.floor(params.interestRate * 100);
+  const durationMs = params.term * 24 * 60 * 60 * 1000;
+
+  tx.moveCall({
+    target: `${packageId}::market::place_borrow_order_standalone`,
+    typeArguments: [
+      getAssetCoinType(params.asset, packageId),
+      getAssetCoinType(params.collateral, packageId),
+    ],
+    arguments: [
+      tx.object(marketId),
+      tx.object(params.collateralCoinId),
+      tx.pure.u64(amountInSmallest),
+      tx.pure.u64(interestRateBps),
+      tx.pure.u64(durationMs),
+      tx.object("0x6"), // Clock object
+    ],
+  });
+
+  return tx;
+}
+
+/**
+ * Build a hidden lend order transaction (ZK-privacy)
+ * Matches: place_hidden_lend_order<Asset, Collateral>(market, payment, commitment, clock, ctx)
+ */
+export function buildHiddenLendOrderTx(params: {
+  asset: string;
+  collateral: string;
+  coinObjectId: string;
+  commitment: Uint8Array;
+}): Transaction {
+  const tx = new Transaction();
+  const packageId = getPackageId();
+  const marketId = getMarketId(params.asset, params.collateral);
+
+  if (!packageId) throw new Error("Package ID not configured");
+  if (!marketId) throw new Error("Market ID not configured");
+
+  tx.moveCall({
+    target: `${packageId}::market::place_hidden_lend_order`,
+    typeArguments: [
+      getAssetCoinType(params.asset, packageId),
+      getAssetCoinType(params.collateral, packageId),
+    ],
+    arguments: [
+      tx.object(marketId),
+      tx.object(params.coinObjectId),
+      tx.pure.vector("u8", Array.from(params.commitment)),
+      tx.object("0x6"), // Clock object
+    ],
+  });
+
+  return tx;
+}
+
+/**
+ * Build create order transaction - unified interface for frontend
+ */
+export function buildCreateOrderTx(params: CreateOrderParams): Transaction {
+  const tx = new Transaction();
+  const packageId = getPackageId();
+  const marketId = getMarketId(params.asset, params.collateral || "SUI");
+
+  if (!packageId) throw new Error("Package ID not configured");
+  if (!marketId) throw new Error("Market ID not configured");
+
+  const interestRateBps = Math.floor(params.interestRate * 100);
+  const durationMs = params.term * 24 * 60 * 60 * 1000;
+  const collateral = params.collateral || "SUI";
+
+  if (params.type === "lend") {
+    // For lend order, we need to split coins from gas
+    const amountInSmallest = toSmallestUnit(params.amount, params.asset);
+    
+    if (params.asset === "SUI") {
+      // Split SUI from gas
+      const [coin] = tx.splitCoins(tx.gas, [amountInSmallest]);
+      
+      tx.moveCall({
+        target: `${packageId}::market::place_lend_order`,
+        typeArguments: [
+          getAssetCoinType(params.asset, packageId),
+          getAssetCoinType(collateral, packageId),
+        ],
+        arguments: [
+          tx.object(marketId),
+          coin,
+          tx.pure.u64(interestRateBps),
+          tx.pure.u64(durationMs),
+          tx.object("0x6"), // Clock object
+        ],
+      });
+    } else {
+      // For other assets, user needs to provide coin object
+      if (!params.coinObjectId) {
+        throw new Error(`For non-SUI assets (${params.asset}), coinObjectId is required`);
+      }
+      return buildLendOrderTx({
+        asset: params.asset,
+        collateral: collateral,
+        amount: params.amount,
+        interestRate: params.interestRate,
+        term: params.term,
+        coinObjectId: params.coinObjectId,
+      });
+    }
+  } else {
+    // Borrow order
+    const amountInSmallest = toSmallestUnit(params.amount, params.asset);
+    const collateralAmount = toSmallestUnit(params.collateralAmount || 0, collateral);
+    
+    if (collateral === "SUI") {
+      // Split SUI from gas as collateral
+      const [collateralCoin] = tx.splitCoins(tx.gas, [collateralAmount]);
+      
+      tx.moveCall({
+        target: `${packageId}::market::place_borrow_order_standalone`,
+        typeArguments: [
+          getAssetCoinType(params.asset, packageId),
+          getAssetCoinType(collateral, packageId),
+        ],
+        arguments: [
+          tx.object(marketId),
+          collateralCoin,
+          tx.pure.u64(amountInSmallest),
+          tx.pure.u64(interestRateBps),
+          tx.pure.u64(durationMs),
+          tx.object("0x6"), // Clock object
+        ],
+      });
+    } else {
+      throw new Error("For non-SUI collateral, provide collateralCoinId");
+    }
   }
+
+  return tx;
 }
 
 export function buildDepositToVaultTx(params: DepositToVaultParams): Transaction {
@@ -100,30 +316,14 @@ export function buildDepositToVaultTx(params: DepositToVaultParams): Transaction
 }
 
 export function buildCreateBorrowTx(params: CreateBorrowParams): Transaction {
-  const tx = new Transaction();
-  const packageId = getPackageId();
-  const registryId = getRegistryId();
-
-  if (!packageId) {
-    throw new Error("Package ID not configured");
-  }
-
-  const borrowAmountMist = BigInt(params.borrowAmount * 1_000_000_000);
-  const ltvBps = Math.floor(params.ltv * 100);
-
-  // Using market module for borrow orders
-  tx.moveCall({
-    target: `${packageId}::market::place_borrow_order`,
-    typeArguments: getAssetTypeArg(params.borrowAsset, packageId),
-    arguments: [
-      tx.object(registryId),
-      tx.object(params.collateralCoinId),
-      tx.pure.u64(borrowAmountMist),
-      tx.pure.u64(ltvBps),
-    ],
+  return buildBorrowOrderTx({
+    asset: params.borrowAsset,
+    collateral: "SUI", // Default collateral
+    borrowAmount: params.borrowAmount,
+    interestRate: params.interestRate || 5.0,
+    term: params.term || 30,
+    collateralCoinId: params.collateralCoinId,
   });
-
-  return tx;
 }
 
 export function buildLockVestingTx(params: LockVestingParams): Transaction {
@@ -139,17 +339,21 @@ export function buildLockVestingTx(params: LockVestingParams): Transaction {
     throw new Error("Vesting vault ID not configured");
   }
 
-  const amountMist = BigInt(params.amount * 1_000_000_000);
-  const lockDurationSeconds = params.lockDurationDays * 24 * 60 * 60;
+  const amountMist = BigInt(Math.floor(params.amount * 1_000_000_000));
+  const lockDurationMs = params.lockDurationDays * 24 * 60 * 60 * 1000;
 
-  // Using vesting module for locking tokens
+  // Split SUI from gas for locking
+  const [coin] = tx.splitCoins(tx.gas, [amountMist]);
+
+  // Using vesting module for locking tokens (simple lock without ZK for MVP)
   tx.moveCall({
-    target: `${packageId}::vesting::lock_sui`,
+    target: `${packageId}::vesting::lock_simple`,
+    typeArguments: ["0x2::sui::SUI"],
     arguments: [
       tx.object(vestingVaultId),
-      tx.gas, // SUI coin to lock
-      tx.pure.u64(amountMist),
-      tx.pure.u64(lockDurationSeconds),
+      coin,
+      tx.pure.u64(lockDurationMs),
+      tx.object("0x6"), // Clock object
     ],
   });
 
@@ -175,6 +379,7 @@ export function buildUnlockVestingTx(vestingPositionId: string): Transaction {
     arguments: [
       tx.object(vestingVaultId),
       tx.object(vestingPositionId),
+      tx.object("0x6"), // Clock object
     ],
   });
 
@@ -184,7 +389,6 @@ export function buildUnlockVestingTx(vestingPositionId: string): Transaction {
 export function buildRepayLoanTx(loanId: string, coinObjectId: string): Transaction {
   const tx = new Transaction();
   const packageId = getPackageId();
-  const registryId = getRegistryId();
 
   if (!packageId) {
     throw new Error("Package ID not configured");
@@ -194,9 +398,9 @@ export function buildRepayLoanTx(loanId: string, coinObjectId: string): Transact
   tx.moveCall({
     target: `${packageId}::loan::repay`,
     arguments: [
-      tx.object(registryId),
       tx.object(loanId),
       tx.object(coinObjectId),
+      tx.object("0x6"), // Clock object
     ],
   });
 
@@ -222,6 +426,7 @@ export function buildClaimVestingRewardsTx(vestingPositionId: string): Transacti
     arguments: [
       tx.object(vestingVaultId),
       tx.object(vestingPositionId),
+      tx.object("0x6"), // Clock object
     ],
   });
 
@@ -237,13 +442,8 @@ export function buildMintTokenTx(asset: string, amount: number): Transaction {
     throw new Error("Package ID not configured");
   }
 
-  // Adjust decimals based on asset
-  // USDC: 6 decimals, ETH: 8 decimals, SUI: 9 decimals
-  let decimals = 9;
-  if (asset === "USDC") decimals = 6;
-  if (asset === "ETH") decimals = 8;
-  
-  const amountMist = BigInt(Math.floor(amount * Math.pow(10, decimals)));
+  const decimals = getDecimals(asset);
+  const amountSmallest = BigInt(Math.floor(amount * Math.pow(10, decimals)));
 
   if (asset === "USDC") {
     const capId = env.sui.usdcAdminCapId;
@@ -253,7 +453,7 @@ export function buildMintTokenTx(asset: string, amount: number): Transaction {
       target: `${packageId}::mock_usdc::faucet`,
       arguments: [
         tx.object(capId),
-        tx.pure.u64(amountMist),
+        tx.pure.u64(amountSmallest),
       ],
     });
   } else if (asset === "ETH") {
@@ -261,17 +461,94 @@ export function buildMintTokenTx(asset: string, amount: number): Transaction {
     if (!capId) throw new Error("ETH Admin Cap ID not configured. Please redeploy contracts.");
 
     tx.moveCall({
-      target: `${packageId}::mock_eth::faucet`, // Corrected module name
+      target: `${packageId}::mock_eth::faucet`,
       arguments: [
         tx.object(capId),
-        tx.pure.u64(amountMist),
+        tx.pure.u64(amountSmallest),
       ],
     });
   } else {
-    // Try generic faucet or fallback
-    console.warn("Using generic faucet for unknown asset");
-    // Fallback logic could be added here if needed, but for now we warn
+    throw new Error(`Faucet not available for ${asset}`);
   }
+
+  return tx;
+}
+
+// Cancel a lend order
+export function buildCancelLendOrderTx(orderId: string, asset: string, collateral: string): Transaction {
+  const tx = new Transaction();
+  const packageId = getPackageId();
+  const marketId = getMarketId(asset, collateral);
+
+  if (!packageId) throw new Error("Package ID not configured");
+  if (!marketId) throw new Error("Market ID not configured");
+
+  tx.moveCall({
+    target: `${packageId}::market::cancel_lend_order`,
+    typeArguments: [
+      getAssetCoinType(asset, packageId),
+      getAssetCoinType(collateral, packageId),
+    ],
+    arguments: [
+      tx.object(marketId),
+      tx.pure.id(orderId),
+    ],
+  });
+
+  return tx;
+}
+
+// Cancel a borrow order
+export function buildCancelBorrowOrderTx(orderId: string, asset: string, collateral: string): Transaction {
+  const tx = new Transaction();
+  const packageId = getPackageId();
+  const marketId = getMarketId(asset, collateral);
+
+  if (!packageId) throw new Error("Package ID not configured");
+  if (!marketId) throw new Error("Market ID not configured");
+
+  tx.moveCall({
+    target: `${packageId}::market::cancel_borrow_order`,
+    typeArguments: [
+      getAssetCoinType(asset, packageId),
+      getAssetCoinType(collateral, packageId),
+    ],
+    arguments: [
+      tx.object(marketId),
+      tx.pure.id(orderId),
+    ],
+  });
+
+  return tx;
+}
+
+// Match orders (for demo/testing)
+export function buildMatchOrdersTx(
+  lendOrderId: string,
+  borrowOrderId: string,
+  asset: string,
+  collateral: string = "SUI"
+): Transaction {
+  const tx = new Transaction();
+  const packageId = getPackageId();
+  const marketId = getMarketId(asset, collateral);
+
+  if (!packageId) throw new Error("Package ID not configured");
+  if (!marketId) throw new Error("Market ID not configured");
+
+  tx.moveCall({
+    target: `${packageId}::market::match_orders`,
+    typeArguments: [
+      getAssetCoinType(asset, packageId),
+      getAssetCoinType(collateral, packageId),
+    ],
+    arguments: [
+      tx.object(marketId),
+      tx.pure.address(lendOrderId), // Use address for ID type
+      tx.pure.address(borrowOrderId),
+      tx.object("0x6"), // Clock object
+    ],
+  });
 
   return tx;
 }

@@ -14,8 +14,15 @@ const STORAGE_KEYS = {
   USER_SALT: "equinox_user_salt",
 } as const;
 
-const PROVER_URL = "https://prover-dev.mystenlabs.com/v1";
-const SALT_SERVICE_URL = "https://salt.api.mystenlabs.com/get_salt";
+// Enoki API URLs - Enoki allows registering custom OAuth client IDs
+// Unlike the direct prover service which only accepts whitelisted IDs
+const ENOKI_API_BASE = "https://api.enoki.mystenlabs.com/v1";
+const ENOKI_ZK_PROOF_URL = `${ENOKI_API_BASE}/zklogin/zkp`;
+const ENOKI_ZK_ADDRESS_URL = `${ENOKI_API_BASE}/zklogin`;
+
+// Legacy prover URLs (kept for reference, but not used when Enoki is configured)
+const LEGACY_PROVER_URL = "https://prover.mystenlabs.com/v1";
+const LEGACY_SALT_SERVICE_URL = "https://salt.api.mystenlabs.com/get_salt";
 
 export interface ZkLoginSession {
   ephemeralPublicKey: string;
@@ -47,6 +54,21 @@ export interface ZkProof {
 
 export function generateEphemeralKeyPair(): Ed25519Keypair {
   return new Ed25519Keypair();
+}
+
+/**
+ * Get raw public key bytes (32 bytes) in base64 format for Enoki API.
+ * The standard toBase64() includes a flag prefix byte (33 bytes total),
+ * but Enoki expects just the raw 32-byte Ed25519 public key.
+ */
+export function getRawPublicKeyBase64(keypair: Ed25519Keypair): string {
+  // toRawBytes() returns the raw public key without the flag prefix
+  const rawBytes = keypair.getPublicKey().toRawBytes();
+  // Convert to base64 using browser's btoa
+  const binaryString = Array.from(rawBytes)
+    .map(byte => String.fromCharCode(byte))
+    .join('');
+  return btoa(binaryString);
 }
 
 export function getStoredKeyPair(): Ed25519Keypair | null {
@@ -198,18 +220,67 @@ export function isZkLoginSupported(): boolean {
   return Boolean(env.zkLogin.googleClientId);
 }
 
-export async function fetchSalt(jwt: string): Promise<string> {
-  const payload = parseJwtPayload(jwt);
-  const sub = payload.sub as string;
-  const aud = payload.aud as string;
+export function isEnokiConfigured(): boolean {
+  return Boolean(env.zkLogin.enokiApiKey && env.zkLogin.enokiApiKey !== "your_enoki_api_key_here");
+}
+
+/**
+ * Fetch salt and address using Enoki API
+ * Enoki manages salt per-app, ensuring consistent addresses
+ */
+export async function fetchSaltAndAddressFromEnoki(jwt: string): Promise<{ salt: string; address: string }> {
+  const enokiApiKey = env.zkLogin.enokiApiKey;
   
+  if (!enokiApiKey || enokiApiKey === "your_enoki_api_key_here") {
+    throw new Error("Enoki API key not configured. Please set NEXT_PUBLIC_ENOKI_API_KEY in .env.local");
+  }
+  
+  const response = await fetch(ENOKI_ZK_ADDRESS_URL, {
+    method: "GET",
+    headers: {
+      "Authorization": `Bearer ${enokiApiKey}`,
+      "zklogin-jwt": jwt,
+    },
+  });
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("Enoki address API error:", errorText);
+    throw new Error(`Enoki address API error: ${response.status} - ${errorText}`);
+  }
+  
+  const result = await response.json();
+  return {
+    salt: result.data.salt,
+    address: result.data.address,
+  };
+}
+
+export async function fetchSalt(jwt: string): Promise<string> {
   const storedSalt = getStoredSalt();
   if (storedSalt) {
     return storedSalt;
   }
   
+  // If Enoki is configured, use Enoki to get salt
+  if (isEnokiConfigured()) {
+    try {
+      const { salt } = await fetchSaltAndAddressFromEnoki(jwt);
+      setStoredSalt(salt);
+      return salt;
+    } catch (error) {
+      console.error("Enoki salt fetch failed:", error);
+      throw error;
+    }
+  }
+  
+  // Fallback to legacy salt service (will likely fail for custom OAuth clients)
+  const payload = parseJwtPayload(jwt);
+  const sub = payload.sub as string;
+  const aud = payload.aud as string;
+  
   try {
-    const response = await fetch(SALT_SERVICE_URL, {
+    const response = await fetch(LEGACY_SALT_SERVICE_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -239,14 +310,33 @@ export async function fetchSalt(jwt: string): Promise<string> {
 }
 
 function generateDeterministicSalt(sub: string, aud: string): string {
+  // Generate a deterministic 128-bit salt from sub and aud
+  // This follows the zkLogin specification for salt values
   const input = `${sub}:${aud}:equinox-hackathon-2026`;
-  let hash = 0;
+  
+  // Use multiple hash iterations to generate a 128-bit value
+  // We need roughly 39 decimal digits for a 128-bit number
+  let hash1 = 0;
+  let hash2 = 0;
+  let hash3 = 0;
+  let hash4 = 0;
+  
   for (let i = 0; i < input.length; i++) {
     const char = input.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash;
+    hash1 = ((hash1 << 5) - hash1 + char) >>> 0;
+    hash2 = ((hash2 << 7) - hash2 + char) >>> 0;
+    hash3 = ((hash3 << 11) - hash3 + char) >>> 0;
+    hash4 = ((hash4 << 13) - hash4 + char) >>> 0;
   }
-  return BigInt(Math.abs(hash)).toString();
+  
+  // Combine hashes to create a large number (simulating 128-bit)
+  // Each hash is 32-bit, so 4 hashes give us 128 bits
+  const bigHash = BigInt(hash1) * BigInt(2**96) + 
+                  BigInt(hash2) * BigInt(2**64) + 
+                  BigInt(hash3) * BigInt(2**32) + 
+                  BigInt(hash4);
+  
+  return bigHash.toString();
 }
 
 export async function deriveZkLoginAddress(jwt: string, salt: string): Promise<string> {
@@ -275,8 +365,14 @@ export async function fetchZkProof(
     return storedProof;
   }
 
+  // Use Enoki if configured
+  if (isEnokiConfigured()) {
+    return fetchZkProofFromEnoki(jwt, ephemeralPublicKey, maxEpoch, randomness, salt);
+  }
+
+  // Fallback to legacy prover (will likely fail for custom OAuth clients)
   try {
-    const response = await fetch(PROVER_URL, {
+    const response = await fetch(LEGACY_PROVER_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -293,15 +389,12 @@ export async function fetchZkProof(
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.warn("Prover service error:", errorText);
-      throw new Error(`Prover service error: ${response.status}`);
+      console.error("Prover service error:", errorText);
+      throw new Error(`Prover service error: ${response.status} - ${errorText}`);
     }
 
     const proof = await response.json() as Omit<ZkProof, 'addressSeed'>;
-    
-    // Calculate address seed as it's required for signing
-    // addressSeed is the big-endian bytes of the salt
-    const addressSeed = BigInt(salt).toString();
+    const addressSeed = salt;
     
     const fullProof: ZkProof = {
       ...proof,
@@ -316,13 +409,90 @@ export async function fetchZkProof(
   }
 }
 
+/**
+ * Fetch ZK proof using Enoki API
+ * This is the preferred method as it allows custom OAuth client IDs
+ */
+async function fetchZkProofFromEnoki(
+  jwt: string,
+  ephemeralPublicKey: string,
+  maxEpoch: number,
+  randomness: string,
+  salt: string
+): Promise<ZkProof> {
+  const enokiApiKey = env.zkLogin.enokiApiKey;
+  const network = env.sui.network;
+  
+  if (!enokiApiKey || enokiApiKey === "your_enoki_api_key_here") {
+    throw new Error("Enoki API key not configured. Please set NEXT_PUBLIC_ENOKI_API_KEY in .env.local");
+  }
+  
+  try {
+    const response = await fetch(ENOKI_ZK_PROOF_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${enokiApiKey}`,
+        "Content-Type": "application/json",
+        "zklogin-jwt": jwt,
+      },
+      body: JSON.stringify({
+        network: network,
+        ephemeralPublicKey: ephemeralPublicKey,
+        maxEpoch: maxEpoch,
+        randomness: randomness,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Enoki ZK proof API error:", errorText);
+      throw new Error(`Enoki ZK proof API error: ${response.status} - ${errorText}`);
+    }
+
+    const result = await response.json();
+    const proofData = result.data;
+    
+    // Enoki returns addressSeed in the response
+    const fullProof: ZkProof = {
+      proofPoints: proofData.proofPoints,
+      issBase64Details: proofData.issBase64Details,
+      headerBase64: proofData.headerBase64,
+      addressSeed: proofData.addressSeed || salt,
+    };
+
+    setStoredZkProof(fullProof);
+    return fullProof;
+  } catch (error) {
+    console.error("Failed to fetch ZK proof from Enoki:", error);
+    throw error;
+  }
+}
+
 export async function completeZkLogin(jwt: string): Promise<{
   address: string;
   salt: string;
   proof?: ZkProof;
 }> {
-  const salt = await fetchSalt(jwt);
-  const address = await deriveZkLoginAddress(jwt, salt);
+  let salt: string;
+  let address: string;
+  
+  // If Enoki is configured, get salt and address from Enoki
+  // This ensures we use the exact same values that Enoki uses for ZK proof
+  if (isEnokiConfigured()) {
+    try {
+      const enokiResult = await fetchSaltAndAddressFromEnoki(jwt);
+      salt = enokiResult.salt;
+      address = enokiResult.address;
+      setStoredSalt(salt);
+    } catch (error) {
+      console.error("Failed to get salt/address from Enoki:", error);
+      throw error;
+    }
+  } else {
+    // Fallback to legacy method
+    salt = await fetchSalt(jwt);
+    address = await deriveZkLoginAddress(jwt, salt);
+  }
   
   setStoredUserAddress(address);
   setStoredJwt(jwt);
@@ -334,15 +504,24 @@ export async function completeZkLogin(jwt: string): Promise<{
     const keypair = getStoredKeyPair();
     if (keypair) {
       try {
+        // Use different public key format based on prover service
+        // Enoki expects raw 32-byte Ed25519 key in base64
+        // Legacy prover expects SuiPublicKey format (33 bytes with flag prefix)
+        const ephemeralPubKey = isEnokiConfigured() 
+          ? getRawPublicKeyBase64(keypair)
+          : keypair.getPublicKey().toBase64();
+        
         proof = await fetchZkProof(
           jwt,
           salt,
-          keypair.getPublicKey().toBase64(),
+          ephemeralPubKey,
           session.maxEpoch,
           session.randomness
         );
       } catch (error) {
-        console.warn("ZK proof generation skipped for demo:", error);
+        console.error("ZK proof generation failed:", error);
+        // Re-throw the error so the user knows there's an issue
+        throw error;
       }
     }
   }

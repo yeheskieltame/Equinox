@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@mysten/dapp-kit": "^1.0.1",
-    "@mysten/sui": "^2.2.0",
+    "@mysten/enoki": "^1.0.2",
+    "@mysten/sui": "^2.3.1",
     "@mysten/zklogin": "^0.8.1",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
