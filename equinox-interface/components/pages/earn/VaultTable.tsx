@@ -42,10 +42,17 @@ export function VaultTable({ vaults }: VaultTableProps) {
               <tr key={vault.id} className="table-row border-b border-[hsl(var(--border))] last:border-b-0">
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-[hsl(var(--primary))]/20 flex items-center justify-center">
-                      <span className="text-sm font-bold text-[hsl(var(--primary))]">
-                        {vault.asset.slice(0, 2)}
-                      </span>
+                    <div className="relative w-10 h-10 rounded-full overflow-hidden bg-[hsl(var(--primary))]/20">
+                      <img 
+                        src={`/token/${vault.asset.toLowerCase()}.png`} 
+                        alt={vault.asset} 
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                          target.parentElement!.innerHTML = `<span class="text-sm font-bold text-[hsl(var(--primary))] absolute inset-0 flex items-center justify-center">${vault.asset.slice(0, 2)}</span>`;
+                        }}
+                      />
                     </div>
                     <div>
                       <p className="text-sm font-medium text-[hsl(var(--foreground))]">{vault.name}</p>
@@ -88,9 +95,18 @@ export function VaultTable({ vaults }: VaultTableProps) {
                     {vault.exposure.slice(0, 4).map((exp, i) => (
                       <div
                         key={i}
-                        className="w-6 h-6 rounded-full bg-[hsl(var(--secondary))] border border-[hsl(var(--border))] flex items-center justify-center -ml-1 first:ml-0"
+                        className="relative w-6 h-6 rounded-full overflow-hidden bg-[hsl(var(--secondary))] border border-[hsl(var(--border))] -ml-1 first:ml-0"
                       >
-                        <span className="text-[10px] font-medium">{exp.slice(0, 1)}</span>
+                        <img 
+                          src={`/token/${exp.toLowerCase()}.png`} 
+                          alt={exp} 
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.style.display = 'none';
+                            target.parentElement!.innerHTML = `<span class="text-[10px] font-medium absolute inset-0 flex items-center justify-center">${exp.slice(0, 1)}</span>`;
+                          }}
+                        />
                       </div>
                     ))}
                     {vault.exposure.length > 4 && (

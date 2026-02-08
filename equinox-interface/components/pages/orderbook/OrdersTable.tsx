@@ -81,22 +81,31 @@ export function OrdersTable({ orders, title, onCancel, emptyMessage = "No orders
               >
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="flex items-center gap-3">
-                    <div
-                      className={`w-9 h-9 rounded-full flex items-center justify-center ${
-                        order.type === "lend"
-                          ? "bg-[hsl(var(--success))]/20"
-                          : "bg-[hsl(var(--warning))]/20"
-                      }`}
-                    >
-                      <span
-                        className={`text-xs font-bold ${
+                    <div className="relative">
+                      <div
+                        className={`w-9 h-9 rounded-full flex items-center justify-center ${
                           order.type === "lend"
-                            ? "text-[hsl(var(--success))]"
-                            : "text-[hsl(var(--warning))]"
+                            ? "bg-[hsl(var(--success))]/20"
+                            : "bg-[hsl(var(--warning))]/20"
                         }`}
                       >
-                        {order.type === "lend" ? "L" : "B"}
-                      </span>
+                        <span
+                          className={`text-xs font-bold ${
+                            order.type === "lend"
+                              ? "text-[hsl(var(--success))]"
+                              : "text-[hsl(var(--warning))]"
+                          }`}
+                        >
+                          {order.type === "lend" ? "L" : "B"}
+                        </span>
+                      </div>
+                      <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full overflow-hidden border-2 border-[hsl(var(--card))]">
+                        <img 
+                          src={`/token/${order.asset.toLowerCase()}.png`} 
+                          alt={order.asset} 
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
                     </div>
                     <div>
                       <div className="flex items-center gap-2">

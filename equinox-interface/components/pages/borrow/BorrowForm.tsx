@@ -17,7 +17,12 @@ import { formatNumber, formatPercentage } from "@/lib/utils/format";
 
 import Image from "next/image";
 
-// ... existing imports ...
+// Asset configuration for multi-collateral support
+const ASSET_CONFIG = {
+  SUI: { price: 2.45, maxLtv: 75, liquidationThreshold: 85, decimals: 9 },
+  USDC: { price: 1.0, maxLtv: 90, liquidationThreshold: 95, decimals: 6 },
+  ETH: { price: 2850.0, maxLtv: 70, liquidationThreshold: 80, decimals: 8 },
+};
 
 interface BorrowFormProps {
   onSubmit: (data: {
@@ -35,12 +40,23 @@ export function BorrowForm({ onSubmit }: BorrowFormProps) {
   const [borrowAsset, setBorrowAsset] = useState("USDC");
   const [ltv, setLtv] = useState([65]);
 
-  const collateralPrice = collateralAsset === "SUI" ? 2.45 : collateralAsset === "WETH" ? 2500 : 1;
+  const collateralConfig = ASSET_CONFIG[collateralAsset as keyof typeof ASSET_CONFIG];
+  const collateralPrice = collateralConfig?.price || 1;
+  const maxLtvForAsset = collateralConfig?.maxLtv || 75;
   const collateralValue = parseFloat(collateralAmount || "0") * collateralPrice;
   const maxBorrow = collateralValue * (ltv[0] / 100);
-  const liquidationPrice = maxBorrow / (parseFloat(collateralAmount || "1") * 0.8);
+  const liquidationPrice = maxBorrow / (parseFloat(collateralAmount || "1") * (collateralConfig?.liquidationThreshold / 100 || 0.8));
 
   const healthFactor = ltv[0] < 50 ? "healthy" : ltv[0] < 70 ? "moderate" : "risky";
+
+  const handleCollateralChange = (asset: string) => {
+    setCollateralAsset(asset);
+    // Reset LTV if it exceeds max for new asset
+    const newMaxLtv = ASSET_CONFIG[asset as keyof typeof ASSET_CONFIG]?.maxLtv || 75;
+    if (ltv[0] > newMaxLtv) {
+      setLtv([newMaxLtv - 10]);
+    }
+  };
 
   // ... handleSubmit ...
   const handleSubmit = (e: React.FormEvent) => {
@@ -72,7 +88,7 @@ export function BorrowForm({ onSubmit }: BorrowFormProps) {
             Collateral
           </label>
           <div className="flex gap-3">
-            <Select value={collateralAsset} onValueChange={setCollateralAsset}>
+            <Select value={collateralAsset} onValueChange={handleCollateralChange}>
               <SelectTrigger className="w-[140px] bg-[hsl(var(--secondary))] border-none cursor-pointer">
                 <SelectValue />
               </SelectTrigger>
@@ -83,6 +99,14 @@ export function BorrowForm({ onSubmit }: BorrowFormProps) {
                       <Image src="/token/sui.png" alt="SUI" fill className="object-cover" />
                     </div>
                     <span>SUI</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="ETH">
+                  <div className="flex items-center gap-2">
+                    <div className="relative w-5 h-5 rounded-full overflow-hidden">
+                      <Image src="/token/eth.png" alt="ETH" fill className="object-cover" />
+                    </div>
+                    <span>ETH</span>
                   </div>
                 </SelectItem>
                 <SelectItem value="USDC">
@@ -138,6 +162,14 @@ export function BorrowForm({ onSubmit }: BorrowFormProps) {
                       <Image src="/token/sui.png" alt="SUI" fill className="object-cover" />
                     </div>
                     <span>SUI</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="ETH">
+                  <div className="flex items-center gap-2">
+                    <div className="relative w-5 h-5 rounded-full overflow-hidden">
+                      <Image src="/token/eth.png" alt="ETH" fill className="object-cover" />
+                    </div>
+                    <span>ETH</span>
                   </div>
                 </SelectItem>
               </SelectContent>

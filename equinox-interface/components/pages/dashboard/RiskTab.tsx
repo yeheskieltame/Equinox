@@ -78,8 +78,30 @@ export function RiskTab({ marketExposure }: RiskTabProps) {
             return (
               <div key={market.asset} className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-[hsl(var(--secondary))] flex items-center justify-center">
-                    <span className="text-xs font-medium">{market.asset[0]}</span>
+                  <div className="relative w-8 h-8 rounded-full overflow-hidden bg-[hsl(var(--secondary))]">
+                    {market.asset.includes("/") ? (
+                      <img 
+                        src={`/token/${market.asset.split(" / ")[0].toLowerCase()}.png`} 
+                        alt={market.asset} 
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                          target.parentElement!.innerHTML = `<span class="text-xs font-medium absolute inset-0 flex items-center justify-center">${market.asset[0]}</span>`;
+                        }}
+                      />
+                    ) : (
+                      <img 
+                        src={`/token/${market.asset.toLowerCase()}.png`} 
+                        alt={market.asset} 
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                          target.parentElement!.innerHTML = `<span class="text-xs font-medium absolute inset-0 flex items-center justify-center">${market.asset[0]}</span>`;
+                        }}
+                      />
+                    )}
                   </div>
                   <div>
                     <p className="text-sm text-[hsl(var(--foreground))]">{market.asset}</p>

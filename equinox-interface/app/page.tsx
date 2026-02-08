@@ -72,17 +72,18 @@ export default function DashboardPage() {
               <div>
                 <p className="text-sm text-[hsl(var(--muted-foreground))] mb-2">Exposure</p>
                 <div className="flex items-center gap-1">
-                  {["BTC", "ETH", "SOL"].map((token, i) => (
+                  {[
+                    { token: "SUI", logo: "/token/sui.png" },
+                    { token: "USDC", logo: "/token/usdc.png" },
+                    { token: "ETH", logo: "/token/eth.png" },
+                  ].map(({ token, logo }) => (
                     <div
                       key={token}
-                      className="w-8 h-8 rounded-full bg-[hsl(var(--secondary))] border-2 border-[hsl(var(--background))] flex items-center justify-center -ml-2 first:ml-0"
+                      className="relative w-8 h-8 rounded-full border-2 border-[hsl(var(--background))] overflow-hidden -ml-2 first:ml-0"
                     >
-                      <span className="text-xs font-medium text-[hsl(var(--foreground))]">{token[0]}</span>
+                      <img src={logo} alt={token} className="w-full h-full object-cover" />
                     </div>
                   ))}
-                  <div className="w-8 h-8 rounded-full bg-[hsl(var(--primary))] border-2 border-[hsl(var(--background))] flex items-center justify-center -ml-2">
-                    <span className="text-xs font-medium text-[hsl(var(--primary-foreground))]">+3</span>
-                  </div>
                 </div>
               </div>
               <div>

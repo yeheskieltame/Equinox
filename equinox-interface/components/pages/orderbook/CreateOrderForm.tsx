@@ -89,6 +89,14 @@ export function CreateOrderForm({ type, onSubmit, isSubmitting = false }: Create
                 <span>SUI</span>
               </div>
             </SelectItem>
+            <SelectItem value="ETH">
+              <div className="flex items-center gap-2">
+                <div className="relative w-5 h-5 rounded-full overflow-hidden">
+                  <Image src="/token/eth.png" alt="ETH" fill className="object-cover" />
+                </div>
+                <span>ETH</span>
+              </div>
+            </SelectItem>
           </SelectContent>
         </Select>
       </div>

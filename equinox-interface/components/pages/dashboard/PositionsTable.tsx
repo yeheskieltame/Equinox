@@ -43,10 +43,17 @@ export function PositionsTable({ positions, title }: PositionsTableProps) {
               >
                 <td className="px-6 py-4 whitespace-nowrap">
                   <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-full bg-[hsl(var(--secondary))] flex items-center justify-center">
-                      <span className="text-xs font-semibold text-[hsl(var(--foreground))]">
-                        {position.symbol.slice(0, 2)}
-                      </span>
+                    <div className="relative w-9 h-9 rounded-full overflow-hidden bg-[hsl(var(--secondary))]">
+                      <img 
+                        src={`/token/${position.symbol.toLowerCase()}.png`} 
+                        alt={position.symbol} 
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                          target.parentElement!.innerHTML = `<span class="text-xs font-semibold text-[hsl(var(--foreground))] absolute inset-0 flex items-center justify-center">${position.symbol.slice(0, 2)}</span>`;
+                        }}
+                      />
                     </div>
                     <div>
                       <p className="text-sm font-medium text-[hsl(var(--foreground))]">{position.asset}</p>

@@ -106,7 +106,7 @@ export const mockVaults: Vault[] = [
     liquidity: 220960000,
     curator: "Steakhouse",
     curatorVerified: true,
-    exposure: ["SUI", "USDC"],
+    exposure: ["SUI", "USDC", "ETH"],
     apy: 4.21,
     utilizationRate: 50.0,
   },
@@ -124,38 +124,38 @@ export const mockVaults: Vault[] = [
   },
   {
     id: "vault-3",
-    name: "Gauntlet USDC Prime",
+    name: "Gauntlet Multi-Collateral",
     asset: "USDC",
     deposits: 320890000,
     liquidity: 210810000,
     curator: "Gauntlet",
     curatorVerified: true,
-    exposure: ["SUI", "USDC"],
+    exposure: ["SUI", "ETH", "USDC"],
     apy: 4.22,
     utilizationRate: 34.3,
   },
   {
     id: "vault-4",
-    name: "Spark USDC Vault",
-    asset: "USDC",
-    deposits: 26150000,
-    liquidity: 10100000,
-    curator: "Spark",
-    curatorVerified: false,
-    exposure: ["SUI", "USDC"],
-    apy: 3.56,
-    utilizationRate: 61.4,
+    name: "DeepBook ETH Vault",
+    asset: "ETH",
+    deposits: 85200,
+    liquidity: 42100,
+    curator: "Equinox",
+    curatorVerified: true,
+    exposure: ["ETH", "USDC"],
+    apy: 4.85,
+    utilizationRate: 50.6,
   },
   {
     id: "vault-5",
-    name: "Seamless USDC Vault",
-    asset: "USDC",
+    name: "Seamless SUI Vault",
+    asset: "SUI",
     deposits: 23350000,
     liquidity: 23260000,
     curator: "Seamless",
     curatorVerified: true,
     exposure: ["SUI", "USDC"],
-    apy: 3.73,
+    apy: 5.21,
     utilizationRate: 0.4,
   },
   {
@@ -166,7 +166,7 @@ export const mockVaults: Vault[] = [
     liquidity: 16340000,
     curator: "Moonwell",
     curatorVerified: true,
-    exposure: ["SUI", "USDC"],
+    exposure: ["SUI", "USDC", "ETH"],
     apy: 4.45,
     utilizationRate: 0.0,
   },
@@ -198,8 +198,9 @@ export const mockVestingPositions: VestingPosition[] = [
 ];
 
 export const mockMarketExposure: MarketExposure[] = [
-  { asset: "SUI / USDC", symbol: "SUI", allocation: 60, vaultAllocation: 625880000, supplyCap: 999999999, apy: 5.21, utilization: 78.43 },
-  { asset: "USDC / SUI", symbol: "USDC", allocation: 40, vaultAllocation: 417060000, supplyCap: 890073000, apy: 4.18, utilization: 82.28 },
+  { asset: "SUI / USDC", symbol: "SUI", allocation: 45, vaultAllocation: 625880000, supplyCap: 999999999, apy: 5.21, utilization: 78.43 },
+  { asset: "USDC / SUI", symbol: "USDC", allocation: 30, vaultAllocation: 417060000, supplyCap: 890073000, apy: 4.18, utilization: 82.28 },
+  { asset: "ETH / USDC", symbol: "ETH", allocation: 25, vaultAllocation: 285400000, supplyCap: 500000000, apy: 4.85, utilization: 71.56 },
 ];
 
 export const mockApyHistory: ChartDataPoint[] = [
@@ -236,9 +237,11 @@ export const mockUser: User = {
 export const mockPrices: PriceData[] = [
   { asset: "SUI", price: 2.45, change24h: 3.2, lastUpdated: "2026-02-05T23:30:00Z" },
   { asset: "USDC", price: 1.0, change24h: 0.0, lastUpdated: "2026-02-05T23:30:00Z" },
+  { asset: "ETH", price: 2850.00, change24h: 1.8, lastUpdated: "2026-02-05T23:30:00Z" },
 ];
 
 export const mockBorrowMarkets = [
-  { asset: "USDC", available: 45200000, borrowApr: 5.2, maxLtv: 85 },
+  { asset: "USDC", available: 45200000, borrowApr: 5.2, maxLtv: 90 },
   { asset: "SUI", available: 12800000, borrowApr: 6.1, maxLtv: 75 },
+  { asset: "ETH", available: 8500000, borrowApr: 5.8, maxLtv: 70 },
 ];
