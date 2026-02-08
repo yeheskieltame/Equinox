@@ -1,59 +1,56 @@
-# Equinox Sui Contracts (Testnet Guide)
+# Equinox Protocol Smart Contracts
 
-## Docker Setup (CRITICAL)
+This directory contains the Move smart contracts for the Equinox Protocol, a multi-collateral lending platform on Sui with DeepBook integration.
 
-Since you are running `sui client` via Docker, use the **`mysten/sui-tools:testnet`** image.
+## Deployment Information (Testnet)
 
-## Interactive Mode (Recommended)
+| Object Name              | Description                    | Object ID                                                            |
+| ------------------------ | ------------------------------ | -------------------------------------------------------------------- |
+| **Package ID**           | Main contract package          | `0x23cd256d2bb6d5d93dfb57a4e70dc5edd40a4d613d929473c9114e87720b9e23` |
+| **Registry**             | Central configuration registry | `0xc1fc221dfb99406f32a1b75c2d4a8765328d0574982eb6c8f8b07605ca6853c5` |
+| **Legacy Vesting Vault** | Vault for legacy SUI locking   | `0x30c017eac9f6f614df6fef261202efe23f950ed4f6f932eb1ca708341c97ae0e` |
+| **AdminCap**             | Administrative capability      | `0x8161ca3649eab04382071faf6a52030b458bb4bec024004befe4a1b219d21235` |
+| **Publisher**            | Package publisher object       | `0x3ab6fec9f73b25651e89ccd3e72f767f57b14d079208d8a21340853fde7915d9` |
+| **UpgradeCap**           | Capability to upgrade package  | `0x4fcfcb99b68e1f67707f7ce56b2bfa0ca9c7c868b82e7f6c935afdb5c5e3e01e` |
 
-The easiest way is to enter the container with your code mounted, then run commands inside.
+### Transaction Details
 
-**1. Enter the Container:**
-Run this from the project root (`/Volumes/SD512/Hacathons/Equinox`):
+- **Transaction Digest**: `9kMXG5G9jRfMYxKNHWqz74rdjSgrA3YDbGYauycUPn5d`
+- **Sender**: `0x5d160e661324a35683964b3d45448eefe2b91054b3c6ea872cb7da32a0dec7c3`
+- **Network**: Sui Testnet
+- **Deployed At**: 2026-02-08
+
+## Modules
+
+1. **`registry`**: Central hub for protocol configuration, supported assets, and markets.
+2. **`market`**: Core lending logic with order book, ZK-hidden orders, and DeepBook integration.
+3. **`loan`**: Defines the Loan object and repayment logic.
+4. **`vesting`**: Manages collateralized vesting positions.
+5. **`mock_coins`**: MOCK_USDC and MOCK_ETH for testing.
+6. **`setup`**: Package initialization and Display setup.
+
+## Development
+
+### Build
+
+Use the provided Docker-based build script:
 
 ```bash
-docker run -it --rm \
-  -v $(pwd):/app \
-  -v $HOME/.sui:/root/.sui \
-  mysten/sui-tools:testnet \
-  bash
+./build.sh
 ```
 
-_Note: `-v $(pwd):/app` makes your code visible inside the container at `/app`._
+### Test
 
-**2. Inside the Container:**
-
-Once your terminal prompt changes to something like `root@...:/sui#`, run these commands:
+Run the comprehensive test suite:
 
 ```bash
-# Go to the contracts folder
-cd /app/contracts/equinox
-
-# Build the contracts
-sui move build
-
-# Publish to Testnet
-sui client publish --gas-budget 100000000 --skip-dependency-verification
+./test.sh
 ```
 
-## 3. Post-Deployment Setup
+### Deploy
 
-After publishing, you will get a **Package ID**.
+Deploy to testnet (requires ~/.sui configuration):
 
-1. **Mint Mock Tokens (Testnet Only):**
-
-   ```bash
-   # Replace with your actual Package ID and Treasury Cap ID
-   sui client call --function mint_usdc --module test_coins --package $PACKAGE_ID --args $TREASURY_CAP_ID 1000000000 $YOUR_ADDRESS --gas-budget 10000000
-   ```
-
-2. **Update Frontend Config:**
-   Update `.env.local` with the new Package ID.
-
-## Modules Overview
-
-- **`market`**: The Order Book. Shared Object.
-- **`loan`**: The Loan NFT. Owned Object.
-- **`vesting`**: The Vesting Vault. Shared Object + Owned Position NFT.
-- **`setup`**: Configures the "Display" standard so your NFTs look correct in the wallet.
-- **`test_coins`**: Mock tokens for testing.
+```bash
+./deploy.sh [gas_budget]
+```
