@@ -33,8 +33,10 @@ import {
 
 interface UserSlice {
   user: User | null;
+  walletAddress: string | null;
   isConnecting: boolean;
   setUser: (user: User | null) => void;
+  setWalletAddress: (address: string | null) => void;
   setIsConnecting: (isConnecting: boolean) => void;
   connectWallet: () => Promise<void>;
   disconnectWallet: () => void;
@@ -96,6 +98,7 @@ const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export const useAppStore = create<AppState>((set, get) => ({
   user: null,
+  walletAddress: null,
   isConnecting: false,
   orders: [],
   isLoadingOrders: false,
@@ -121,6 +124,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   isLoadingMarket: false,
 
   setUser: (user) => set({ user }),
+  setWalletAddress: (address) => set({ walletAddress: address }),
   setIsConnecting: (isConnecting) => set({ isConnecting }),
 
   connectWallet: async () => {
@@ -147,6 +151,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   disconnectWallet: () => {
     set({
       user: null,
+      walletAddress: null,
       orders: [],
       positions: [],
       vestingPositions: [],
@@ -156,14 +161,14 @@ export const useAppStore = create<AppState>((set, get) => ({
   setOrders: (orders) => set({ orders }),
 
   addOrder: async (order) => {
-    const { orders, user, vestingPositions } = get();
+    const { orders, walletAddress, vestingPositions } = get();
     
     const isVested = vestingPositions.some(vp => vp.status === "locked" || vp.status === "unlockable");
     
     try {
       const fairnessResult = await calculateFairnessScore(
         order.amount,
-        user?.address || "",
+        walletAddress || "",
         isVested
       );
       
@@ -193,11 +198,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   fetchOrders: async () => {
-    const { user } = get();
+    const { walletAddress } = get();
     set({ isLoadingOrders: true });
 
     try {
-      const orders = await fetchBlockchainOrders(user?.address || "");
+      const orders = await fetchBlockchainOrders(walletAddress || "");
       set({ orders, isLoadingOrders: false });
     } catch (error) {
       console.error("Failed to fetch orders:", error);
@@ -208,11 +213,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   setPositions: (positions) => set({ positions }),
 
   fetchPositions: async () => {
-    const { user } = get();
+    const { walletAddress } = get();
     set({ isLoadingPositions: true });
 
     try {
-      const positions = await fetchBlockchainPositions(user?.address || "");
+      const positions = await fetchBlockchainPositions(walletAddress || "");
       set({ positions, isLoadingPositions: false });
     } catch (error) {
       console.error("Failed to fetch positions:", error);
@@ -269,11 +274,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   fetchVestingPositions: async () => {
-    const { user } = get();
+    const { walletAddress } = get();
     set({ isLoadingVesting: true });
 
     try {
-      const vestingPositions = await fetchBlockchainVestingPositions(user?.address || "");
+      const vestingPositions = await fetchBlockchainVestingPositions(walletAddress || "");
       set({ vestingPositions, isLoadingVesting: false });
     } catch (error) {
       console.error("Failed to fetch vesting positions:", error);

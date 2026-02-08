@@ -373,9 +373,10 @@ export function buildUnlockVestingTx(vestingPositionId: string): Transaction {
     throw new Error("Vesting vault ID not configured");
   }
 
-  // Using vesting module for unlocking
+  // Using vesting module for unlocking (generic function unlock<T>)
   tx.moveCall({
     target: `${packageId}::vesting::unlock`,
+    typeArguments: ["0x2::sui::SUI"],
     arguments: [
       tx.object(vestingVaultId),
       tx.object(vestingPositionId),

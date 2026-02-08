@@ -96,6 +96,31 @@ export function useWallet() {
 function WalletContextProvider({ children }: { children: ReactNode }) {
   const wallet = useWallet();
   
+  // Sync wallet address with store and fetch data on connect
+  useEffect(() => {
+    // Dynamic import to avoid circular dependencies
+    import("@/lib/store").then(({ useAppStore }) => {
+      const store = useAppStore.getState();
+      const currentStoreAddress = store.walletAddress;
+      const newAddress = wallet.address;
+      
+      // If wallet connected/changed, update store and fetch data
+      if (newAddress && newAddress !== currentStoreAddress) {
+        store.setWalletAddress(newAddress);
+        // Fetch data for the connected wallet
+        Promise.all([
+          store.fetchOrders(),
+          store.fetchPositions(),
+          store.fetchVestingPositions(),
+          store.fetchMarketData(),
+        ]).catch(console.error);
+      } else if (!newAddress && currentStoreAddress) {
+        // Wallet disconnected
+        store.disconnectWallet();
+      }
+    });
+  }, [wallet.address]);
+  
   return (
     <WalletContext.Provider value={wallet}>
       <TransactionExecutorSetup />

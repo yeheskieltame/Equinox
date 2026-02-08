@@ -200,45 +200,121 @@ export async function fetchBlockchainPositions(userAddress: string): Promise<Pos
       return [];
     }
 
-    // Query Loan objects from loan module
-    const objects = await client.getOwnedObjects({
-      owner: userAddress,
-      filter: {
-        StructType: `${packageId}::loan::Loan`,
-      },
-      options: {
-        showContent: true,
-        showType: true,
-      },
-    });
+    // Loan is a generic type: Loan<Asset, Collateral>
+    // We need to query for all possible combinations or use MatchAny
+    // For MVP, we query the most common pairs
+    const loanTypes = [
+      `${packageId}::loan::Loan<${packageId}::mock_usdc::MOCK_USDC, 0x2::sui::SUI>`,
+      `${packageId}::loan::Loan<0x2::sui::SUI, ${packageId}::mock_usdc::MOCK_USDC>`,
+      `${packageId}::loan::Loan<${packageId}::mock_usdc::MOCK_USDC, ${packageId}::mock_eth::MOCK_ETH>`,
+    ];
 
-    if (objects.data.length === 0) {
-      return [];
+    const allPositions: Position[] = [];
+
+    for (const loanType of loanTypes) {
+      try {
+        const objects = await client.getOwnedObjects({
+          owner: userAddress,
+          filter: {
+            StructType: loanType,
+          },
+          options: {
+            showContent: true,
+            showType: true,
+          },
+        });
+
+        for (const obj of objects.data) {
+          const content = obj.data?.content;
+          if (content?.dataType !== "moveObject") continue;
+          
+          const fields = content.fields as Record<string, unknown>;
+          const objType = content.type || "";
+          
+          // Loan struct fields from loan.move:
+          // - borrower: address
+          // - lender: address
+          // - amount: u64
+          // - interest_rate_bps: u64
+          // - start_timestamp: u64
+          // - duration: u64
+          // - collateral_balance: Balance<Collateral>
+          
+          // Determine if user is lender or borrower
+          const borrower = fields.borrower as string;
+          const lender = fields.lender as string;
+          const isLender = lender === userAddress;
+          
+          const amount = Number(fields.amount || 0);
+          const startTimestamp = Number(fields.start_timestamp || 0);
+          const duration = Number(fields.duration || 0);
+          const interestRateBps = Number(fields.interest_rate_bps || 0);
+          
+          // Parse collateral balance
+          const collateralBalanceField = fields.collateral_balance as Record<string, unknown> | undefined;
+          const collateralAmount = collateralBalanceField 
+            ? Number(collateralBalanceField.value || 0)
+            : 0;
+          
+          // Extract asset and collateral from type string
+          // e.g., "0x...::loan::Loan<0x...::mock_usdc::MOCK_USDC, 0x2::sui::SUI>"
+          let asset = "USDC";
+          let collateralAsset = "SUI";
+          if (objType.includes("mock_usdc")) {
+            asset = "USDC";
+          } else if (objType.includes("sui::SUI")) {
+            asset = "SUI";
+          }
+          if (objType.includes("mock_eth")) {
+            collateralAsset = objType.indexOf("mock_eth") > objType.indexOf("Loan") 
+              ? "ETH" : collateralAsset;
+          }
+          
+          // Determine decimals based on asset
+          const assetDecimals = asset === "USDC" ? 6 : asset === "ETH" ? 8 : 9;
+          const collateralDecimals = collateralAsset === "USDC" ? 6 : collateralAsset === "ETH" ? 8 : 9;
+          
+          // Calculate earned/paid interest based on time elapsed
+          const now = Date.now();
+          const elapsedMs = Math.max(0, now - startTimestamp);
+          const yearMs = 31536000000;
+          const principalNum = amount;
+          const interestAccrued = Math.floor((principalNum * interestRateBps * elapsedMs) / (10000 * yearMs));
+          
+          // Determine status
+          let status: Position["status"] = "active";
+          if (now > startTimestamp + duration) {
+            status = "active"; // Still active but overdue (can be liquidated)
+          }
+          
+          const position: Position = {
+            id: obj.data?.objectId || "",
+            type: isLender ? "lending" : "borrowing",
+            asset,
+            amount: amount / Math.pow(10, assetDecimals),
+            interestRate: interestRateBps / 100,
+            ltv: collateralAmount > 0 ? (amount / collateralAmount) * 100 : 0,
+            term: Math.floor(duration / (24 * 60 * 60 * 1000)), // Convert ms to days
+            startDate: new Date(startTimestamp).toISOString(),
+            endDate: new Date(startTimestamp + duration).toISOString(),
+            earnedInterest: isLender ? interestAccrued / Math.pow(10, assetDecimals) : 0,
+            paidInterest: !isLender ? interestAccrued / Math.pow(10, assetDecimals) : 0,
+            status,
+            collateralAsset: !isLender ? collateralAsset : undefined,
+            collateralAmount: !isLender ? collateralAmount / Math.pow(10, collateralDecimals) : undefined,
+            liquidationPrice: !isLender && collateralAmount > 0 
+              ? (amount * 1.1) / collateralAmount // 110% of current ratio
+              : undefined,
+          };
+          
+          allPositions.push(position);
+        }
+      } catch (e) {
+        console.warn(`Error fetching loans of type ${loanType}:`, e);
+      }
     }
 
-    return objects.data.map((obj) => {
-      const content = obj.data?.content;
-      if (content?.dataType !== "moveObject") return null;
-      
-      const fields = content.fields as Record<string, unknown>;
-      return {
-        id: obj.data?.objectId || "",
-        type: fields.is_lender ? "lending" : "borrowing",
-        asset: String(fields.asset || "USDC"),
-        amount: Number(fields.amount || 0) / 1_000_000_000,
-        interestRate: Number(fields.interest_rate || 0) / 100,
-        ltv: Number(fields.ltv || 0) / 100,
-        term: Number(fields.term || 0) / (24 * 60 * 60),
-        startDate: new Date(Number(fields.start_date || 0)).toISOString(),
-        endDate: new Date(Number(fields.end_date || 0)).toISOString(),
-        earnedInterest: Number(fields.earned_interest || 0) / 1_000_000_000,
-        paidInterest: Number(fields.paid_interest || 0) / 1_000_000_000,
-        status: String(fields.status || "active") as Position["status"],
-        collateralAsset: fields.collateral_asset ? String(fields.collateral_asset) : undefined,
-        collateralAmount: fields.collateral_amount ? Number(fields.collateral_amount) / 1_000_000_000 : undefined,
-        liquidationPrice: fields.liquidation_price ? Number(fields.liquidation_price) / 1_000_000_000 : undefined,
-      } as Position;
-    }).filter(Boolean) as Position[];
+    return allPositions;
   } catch (error) {
     console.error("Error fetching positions from blockchain:", error);
     return [];
@@ -272,6 +348,7 @@ export async function fetchBlockchainVestingPositions(userAddress: string): Prom
     }
 
     // Query VestingPosition objects from vesting module
+    // VestingPosition is NOT a generic type in the Move contract
     const objects = await client.getOwnedObjects({
       owner: userAddress,
       filter: {
@@ -294,25 +371,48 @@ export async function fetchBlockchainVestingPositions(userAddress: string): Prom
       if (content?.dataType !== "moveObject") return null;
       
       const fields = content.fields as Record<string, unknown>;
-      const unlockDate = Number(fields.unlock_date || 0);
+      
+      // VestingPosition struct fields from vesting.move:
+      // - amount: u64
+      // - token_type: ascii::String
+      // - start_timestamp: u64
+      // - lock_duration: u64
+      // - owner: address
+      // - is_collateralized: bool
+      // - loan_id: Option<ID>
+      // - pending_rewards: u64
+      
+      const startTimestamp = Number(fields.start_timestamp || 0);
+      const lockDuration = Number(fields.lock_duration || 0);
+      const unlockTimestamp = startTimestamp + lockDuration;
+      const isCollateralized = Boolean(fields.is_collateralized);
       
       let status: VestingPosition["status"] = "locked";
-      if (fields.is_unlocked) {
-        status = "unlocked";
-      } else if (unlockDate <= now) {
+      if (unlockTimestamp <= now && !isCollateralized) {
         status = "unlockable";
       }
+      // Note: "unlocked" status means position was already claimed and shouldn't exist
+      
+      // Calculate APY based on lock duration (same logic as contract)
+      const durationDays = lockDuration / (24 * 60 * 60 * 1000);
+      let subsidyRate = 2.0; // BASE_SUBSIDY_BPS = 200 = 2%
+      if (durationDays >= 90) {
+        subsidyRate = 3.0;
+      } else if (durationDays >= 30) {
+        subsidyRate = 2.5;
+      }
+      const baseApy = 4.5;
       
       return {
         id: obj.data?.objectId || "",
         amount: Number(fields.amount || 0) / 1_000_000_000,
-        lockDate: new Date(Number(fields.lock_date || 0)).toISOString(),
-        unlockDate: new Date(unlockDate).toISOString(),
-        apy: Number(fields.apy || 0) / 100,
-        subsidyRate: Number(fields.subsidy_rate || 0) / 100,
-        earnedRewards: Number(fields.earned_rewards || 0) / 1_000_000_000,
+        lockDate: new Date(startTimestamp).toISOString(),
+        unlockDate: new Date(unlockTimestamp).toISOString(),
+        apy: baseApy + subsidyRate,
+        subsidyRate,
+        earnedRewards: Number(fields.pending_rewards || 0) / 1_000_000_000,
         status,
-        zkProofVerified: Boolean(fields.zk_proof_verified || true),
+        zkProofVerified: true, // ZK proof was verified at lock time
       } as VestingPosition;
     }).filter(Boolean) as VestingPosition[];
   } catch (error) {

@@ -356,13 +356,22 @@ export async function executeMatchOrders(
     return { success: true, digest: `mock_${Date.now()}` };
   }
 
-  try {
-    const tx = buildMatchOrdersTx(lendOrderId, borrowOrderId, asset);
-    return await executeTransaction(tx, userAddress);
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Failed to create match orders transaction",
-    };
-  }
+  // In real mode, order matching requires:
+  // 1. A registered Nautilus AI enclave
+  // 2. Fairness score computed by the enclave
+  // 3. Ed25519 signature proof from the enclave
+  //
+  // For production deployment, this would call a Nautilus API endpoint 
+  // to compute fairness score and generate the signed proof.
+  //
+  // For hackathon demo, we use mock mode which simulates this process.
+  // In the future, integrate with Nautilus enclave for AI-verified matching.
+  
+  return {
+    success: false,
+    error: "Real-time order matching requires AI enclave verification (Nautilus). " +
+           "Please use Mock Mode for demo, or wait for Nautilus integration. " +
+           "See BLUEPRINT.md for more details on the AI-fairness matching system.",
+  };
 }
+
