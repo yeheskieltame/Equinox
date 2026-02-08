@@ -139,7 +139,11 @@ function OrderbookSide({
                           isBid ? "text-[hsl(var(--success))]" : "text-[hsl(var(--destructive))]"
                         }`}
                       >
-                        {row.price.toFixed(2)}%
+                        {row.order.isHidden ? (
+                          <span className="font-mono">**.**%</span>
+                        ) : (
+                          `${row.price.toFixed(2)}%`
+                        )}
                       </span>
                       {row.order.isHidden && (
                         <EyeOff className="w-3 h-3 text-[hsl(var(--primary))] opacity-60" />
@@ -150,14 +154,22 @@ function OrderbookSide({
                   {/* Amount */}
                   <td className="px-4 py-2.5 text-right relative">
                     <span className="text-sm text-[hsl(var(--foreground))]">
-                      ${formatNumber(row.amount)}
+                      {row.order.isHidden ? (
+                        <span className="font-mono text-[hsl(var(--muted-foreground))]">****</span>
+                      ) : (
+                        `$${formatNumber(row.amount)}`
+                      )}
                     </span>
                   </td>
 
                   {/* Total */}
                   <td className="px-4 py-2.5 text-right relative">
                     <span className="text-sm text-[hsl(var(--muted-foreground))]">
-                      ${formatNumber(row.total)}
+                      {row.order.isHidden ? (
+                        <span className="font-mono">****</span>
+                      ) : (
+                        `$${formatNumber(row.total)}`
+                      )}
                     </span>
                   </td>
                 </tr>

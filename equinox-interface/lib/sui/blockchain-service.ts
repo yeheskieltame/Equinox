@@ -1,8 +1,9 @@
+
 import { getSuiClient } from "@/lib/sui/client";
 import { env, isMockMode, isRealMode } from "@/lib/config";
 import type { Order, Position, VestingPosition, MarketStats, PriceData, MarketExposure, ChartDataPoint } from "@/lib/types";
 import {
-  mockOrders,
+  mockOrders, // Keeping these as fallback or initial state for MockState
   mockPositions,
   mockVestingPositions,
   mockStats,
@@ -12,6 +13,7 @@ import {
   mockBorrowMarkets,
   mockVaults,
 } from "@/lib/data";
+import { MockState } from "@/lib/sui/mock-state";
 import type { Vault } from "@/lib/types";
 
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -43,18 +45,13 @@ function isValidSuiAddress(address: string): boolean {
 
 /**
  * Fetch orders from blockchain
- * In real mode: Queries blockchain for Order objects, returns empty if none found
- * In mock mode: Returns mock orders
- */
-/**
- * Fetch orders from blockchain
  * In real mode: Queries blockchain for Order objects from Market table
- * In mock mode: Returns mock orders
+ * In mock mode: Returns mock orders from State
  */
 export async function fetchBlockchainOrders(userAddress: string): Promise<Order[]> {
   if (isMockMode()) {
-    await delay(500);
-    return mockOrders;
+    await delay(300);
+    return MockState.getOrders();
   }
 
   try {
@@ -149,28 +146,15 @@ export async function fetchBlockchainOrders(userAddress: string): Promise<Order[
           id: orderId,
           creator: fields.creator, // Add creator field to Order type if missing or use it for filtering
           type: fields.is_lend ? "lend" : "borrow",
-          asset: "USDC", // MVP hardcoded asset (Market<MOCK_USDC, SUI>)
-          amount: Number(fields.amount || 0) / 1_000_000_000, // Assuming 9 decimals for now, wait check asset
-          // MOCK_USDC is 6 decimals!
-          // But our Market<Asset, Collateral>
-          // BuildTx uses 6 decimals for USDC.
-          // So if asset is USDC, divide by 1_000_000
-          // But wait, the frontend expects 'amount' in human readable
-          
+          asset: "USDC", // MVP hardcoded asset
+          amount: Number(fields.amount || 0) / 1_000_000, 
           interestRate: Number(fields.interest_rate_bps || 0) / 100,
           ltv: 0.7, // Order struct doesn't have LTV field! It's implied. Mocking 70% for display.
-          // Or calculate from collateral_price / asset_price if available?
-          // Actually place_borrow_order takes collateral amount but Order struct doesn't store it explicitly?
-          // Wait, Order struct: collateral_price, asset_price.
-          // But for Lend Order: price is meaningless?
-          // For Borrow Order: amount is amount_requested (Asset). 
-          // Collateral is stored in `collateral_balances` Table<ID, Balance<Collateral>> separately!
-          
           term: Number(fields.duration_ms || 0) / (24 * 60 * 60 * 1000),
           status: "pending", // All orders in table are pending/active
           createdAt: new Date(Number(fields.created_at || 0)).toISOString(),
           isHidden: false, // Table 'orders' is for public orders
-          fairnessScore: 85, // Mock score as it's not stored in Order struct (only in VestedBorrowOrder)
+          fairnessScore: 85, // Mock score as it's not stored in Order struct
           zkProofHash: undefined,
         } as Order;
       } catch (e) {
@@ -181,23 +165,8 @@ export async function fetchBlockchainOrders(userAddress: string): Promise<Order[
 
     const results = await Promise.all(orderPromises);
     
-    // Filter out nulls and fix asset decimals
-    return results.filter(Boolean).map(order => {
-        if (order) {
-            // Fix amount decimals: USDC = 6
-             // Previously we divided by 1e9, need to adjust
-             order.amount = order.amount * 1000; // 1e9 -> 1e6 adjustment
-             // Wait, logic above divided by 1e9.
-             // If on chain is 1e6 (USDC), then dividing by 1e9 results in 0.001 * actual.
-             // So we need to multiply by 1000 to get back to correct human readable if we assumed 1e9.
-             // Better logic:
-             // OnChain: 5000000 (5 USDC)
-             // Code: 5000000 / 1e9 = 0.005
-             // Correct: 5000000 / 1e6 = 5
-             // So 0.005 * 1000 = 5. Correct.
-        }
-        return order;
-    }) as Order[];
+    // Filter out nulls
+    return results.filter(Boolean) as Order[];
 
   } catch (error) {
     console.error("Error fetching orders from blockchain:", error);
@@ -208,12 +177,12 @@ export async function fetchBlockchainOrders(userAddress: string): Promise<Order[
 /**
  * Fetch positions from blockchain
  * In real mode: Queries blockchain for Loan objects, returns empty if none found
- * In mock mode: Returns mock positions
+ * In mock mode: Returns mock positions from State
  */
 export async function fetchBlockchainPositions(userAddress: string): Promise<Position[]> {
   if (isMockMode()) {
-    await delay(500);
-    return mockPositions;
+    await delay(300);
+    return MockState.getPositions();
   }
 
   // Real mode - fetch from blockchain only
@@ -279,12 +248,12 @@ export async function fetchBlockchainPositions(userAddress: string): Promise<Pos
 /**
  * Fetch vesting positions from blockchain
  * In real mode: Queries blockchain for VestingPosition objects, returns empty if none found
- * In mock mode: Returns mock vesting positions
+ * In mock mode: Returns mock vesting positions from State
  */
 export async function fetchBlockchainVestingPositions(userAddress: string): Promise<VestingPosition[]> {
   if (isMockMode()) {
-    await delay(500);
-    return mockVestingPositions;
+    await delay(300);
+    return MockState.getVestingPositions();
   }
 
   // Real mode - fetch from blockchain only
@@ -355,12 +324,12 @@ export async function fetchBlockchainVestingPositions(userAddress: string): Prom
 /**
  * Fetch market stats from blockchain
  * In real mode: Tries to fetch from registry, returns default stats if not available
- * In mock mode: Returns mock stats
+ * In mock mode: Returns mock stats from State
  */
 export async function fetchBlockchainStats(): Promise<MarketStats> {
   if (isMockMode()) {
     await delay(300);
-    return mockStats;
+    return MockState.getStats();
   }
 
   // Default stats for real mode when data is not available
@@ -414,12 +383,12 @@ export async function fetchBlockchainStats(): Promise<MarketStats> {
 /**
  * Fetch real-time prices from Pyth oracle
  * In real mode: Fetches from Pyth API, returns default prices on error
- * In mock mode: Returns mock prices
+ * In mock mode: Returns mock prices from State
  */
 export async function fetchBlockchainPrices(): Promise<PriceData[]> {
   if (isMockMode()) {
     await delay(300);
-    return mockPrices;
+    return MockState.getPrices();
   }
 
   const oracle = env.priceOracle;
@@ -554,7 +523,7 @@ export async function fetchBorrowMarkets(): Promise<{ asset: string; available: 
 export async function fetchVaults(): Promise<Vault[]> {
   if (isMockMode()) {
     await delay(500);
-    return mockVaults;
+    return MockState.getVaults();
   }
 
   // Real mode: Return empty vaults (would need vault registry in production)
@@ -563,24 +532,7 @@ export async function fetchVaults(): Promise<Vault[]> {
 
 /**
  * NAUTILUS AI FAIRNESS SCORING SYSTEM
- * ====================================
- * 
- * This module implements the AI-verifiable fair matching system described in the blueprint.
- * In production, this would integrate with Nautilus off-chain compute for verifiable AI inference.
- * 
- * ARCHITECTURE:
- * 1. Frontend sends order parameters to Nautilus API
- * 2. Nautilus runs ML model to calculate fairness score
- * 3. Result includes cryptographic proof of computation
- * 4. Proof is verified on-chain during order matching
- * 
- * SCORING FACTORS (from Blueprint):
- * - Order size (smaller = higher priority for retail protection)
- * - Historical behavior (good actors get rewarded)
- * - Vesting participation (shows long-term commitment)
- * - Time in queue (prevents starvation)
  */
-
 interface FairnessResult {
   score: number;
   breakdown: {
@@ -625,10 +577,6 @@ export async function calculateFairnessScore(
   };
 }
 
-/**
- * Verify a fairness proof on-chain
- * In production, this would call a Move function to verify the Nautilus proof
- */
 export async function verifyFairnessProof(proof: string): Promise<boolean> {
   // Simulated verification - in production would call blockchain
   await delay(200);
@@ -640,11 +588,9 @@ export async function verifyFairnessProof(proof: string): Promise<boolean> {
  * Used when user needs to select a coin to deposit/use as collateral
  */
 export async function fetchUserCoins(userAddress: string, coinType?: string): Promise<{ objectId: string; balance: number }[]> {
-  if (isMockMode()) {
-    await delay(300);
-    return [];
-  }
-
+  // ALWAYS fetch real coins if address is real
+  // Faucet works on real coins
+  
   if (!userAddress || !isValidSuiAddress(userAddress)) {
     return [];
   }

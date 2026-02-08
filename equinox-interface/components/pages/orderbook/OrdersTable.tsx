@@ -129,17 +129,29 @@ export function OrdersTable({ orders, title, onCancel, emptyMessage = "No orders
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className="text-sm font-medium text-[hsl(var(--foreground))]">
-                    ${formatNumber(order.amount)}
+                    {(order.isHidden && order.status !== 'matched') ? (
+                        <span className="font-mono text-[hsl(var(--muted-foreground))]">****</span>
+                    ) : (
+                        `$${formatNumber(order.amount)}`
+                    )}
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className="text-sm font-medium text-[hsl(var(--primary))]">
-                    {formatPercentage(order.interestRate)}
+                    {(order.isHidden && order.status !== 'matched') ? (
+                        <span className="font-mono">**.**%</span>
+                    ) : (
+                        formatPercentage(order.interestRate)
+                    )}
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className="text-sm text-[hsl(var(--foreground))]">
-                    {formatPercentage(order.ltv)}
+                    {(order.isHidden && order.status !== 'matched') ? (
+                        <span className="font-mono">**.**%</span>
+                    ) : (
+                        formatPercentage(order.ltv)
+                    )}
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">

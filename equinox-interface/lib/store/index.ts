@@ -55,6 +55,8 @@ interface PositionSlice {
   isLoadingPositions: boolean;
   setPositions: (positions: Position[]) => void;
   fetchPositions: () => Promise<void>;
+  repayPosition: (positionId: string) => void;
+  liquidatePosition: (positionId: string) => void;
 }
 
 interface VaultSlice {
@@ -124,29 +126,22 @@ export const useAppStore = create<AppState>((set, get) => ({
   connectWallet: async () => {
     set({ isConnecting: true });
 
+    // In both real and mock mode, we try to behave similarly regarding connection state.
+    // If mock mode, we just add a delay. Real wallet connection is handled by the provider/wallet adapter.
     if (isMockMode()) {
-      await delay(1500);
-      set({
-        user: mockUser,
-        orders: mockOrders,
-        positions: mockPositions,
-        vestingPositions: mockVestingPositions,
-        isConnecting: false,
-      });
-    } else {
-      // In real mode, wallet connection is handled by SuiProvider
-      // After connection, we need to fetch data
-      set({ isConnecting: false });
-      
-      // Trigger data fetching - the actual wallet state comes from useWallet hook
-      const { fetchOrders, fetchPositions, fetchVestingPositions, fetchMarketData } = get();
-      await Promise.all([
-        fetchOrders(),
-        fetchPositions(),
-        fetchVestingPositions(),
-        fetchMarketData(),
-      ]);
+      await delay(500);
     }
+    
+    set({ isConnecting: false });
+    
+    // Trigger data fetching
+    const { fetchOrders, fetchPositions, fetchVestingPositions, fetchMarketData } = get();
+    await Promise.all([
+      fetchOrders(),
+      fetchPositions(),
+      fetchVestingPositions(),
+      fetchMarketData(),
+    ]);
   },
 
   disconnectWallet: () => {
@@ -223,6 +218,24 @@ export const useAppStore = create<AppState>((set, get) => ({
       console.error("Failed to fetch positions:", error);
       set({ isLoadingPositions: false });
     }
+  },
+
+  repayPosition: (positionId) => {
+    const { positions } = get();
+    set({
+      positions: positions.map((p) =>
+        p.id === positionId ? { ...p, status: "completed" as const, endDate: new Date().toISOString() } : p
+      ),
+    });
+  },
+
+  liquidatePosition: (positionId) => {
+    const { positions } = get();
+    set({
+      positions: positions.map((p) =>
+        p.id === positionId ? { ...p, status: "liquidated" as const, endDate: new Date().toISOString() } : p
+      ),
+    });
   },
 
   setVaults: (vaults) => set({ vaults }),
@@ -308,4 +321,3 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 }));
-

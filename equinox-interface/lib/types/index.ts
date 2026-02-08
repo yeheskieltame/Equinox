@@ -19,6 +19,7 @@ export interface Order {
   isHidden: boolean;
   fairnessScore?: number;
   zkProofHash?: string;
+  collaterals?: { asset: string; amount: number }[];
 }
 
 export interface Position {
@@ -36,6 +37,7 @@ export interface Position {
   status: PositionStatus;
   collateralAsset?: string;
   collateralAmount?: number;
+  collaterals?: { asset: string; amount: number }[];
   liquidationPrice?: number;
 }
 

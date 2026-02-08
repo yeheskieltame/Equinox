@@ -63,6 +63,23 @@ export const mockOrders: Order[] = [
     isHidden: false,
     fairnessScore: 95,
   },
+  {
+    id: "order-4",
+    type: "borrow",
+    asset: "USDC",
+    amount: 15000,
+    interestRate: 5.5,
+    ltv: 60,
+    term: 30,
+    status: "pending",
+    createdAt: "2026-02-06T11:20:00Z",
+    isHidden: false,
+    fairnessScore: 89,
+    collaterals: [
+      { asset: "SUI", amount: 10000 },
+      { asset: "ETH", amount: 2 }
+    ]
+  },
 ];
 
 export const mockPositions: Position[] = [
@@ -91,9 +108,32 @@ export const mockPositions: Position[] = [
     endDate: "2026-02-15T00:00:00Z",
     paidInterest: 234.12,
     status: "active",
-    collateralAsset: "USDC",
+    collateralAsset: "USDC", // Legacy/Primary
     collateralAmount: 45000,
     liquidationPrice: 1.85,
+    collaterals: [
+      { asset: "USDC", amount: 45000 }
+    ]
+  },
+  {
+    id: "pos-3",
+    type: "borrowing",
+    asset: "USDC",
+    amount: 50000,
+    interestRate: 5.8,
+    ltv: 65,
+    term: 30,
+    startDate: "2026-02-05T00:00:00Z",
+    endDate: "2026-03-07T00:00:00Z",
+    paidInterest: 0,
+    status: "active",
+    collateralAsset: "SUI", 
+    collateralAmount: 35000,
+    liquidationPrice: 1.10,
+    collaterals: [
+      { asset: "SUI", amount: 35000 },
+      { asset: "ETH", amount: 10 }
+    ]
   },
 ];
 
@@ -204,22 +244,22 @@ export const mockMarketExposure: MarketExposure[] = [
 ];
 
 export const mockApyHistory: ChartDataPoint[] = [
-  { date: "Jan 6", value: 4.15 },
-  { date: "Jan 8", value: 4.18 },
-  { date: "Jan 10", value: 4.22 },
-  { date: "Jan 12", value: 4.19 },
-  { date: "Jan 14", value: 4.25 },
-  { date: "Jan 16", value: 4.28 },
-  { date: "Jan 18", value: 4.21 },
-  { date: "Jan 20", value: 4.24 },
-  { date: "Jan 22", value: 4.26 },
-  { date: "Jan 24", value: 4.23 },
-  { date: "Jan 26", value: 4.20 },
-  { date: "Jan 28", value: 4.22 },
-  { date: "Jan 30", value: 4.19 },
-  { date: "Feb 1", value: 4.21 },
-  { date: "Feb 3", value: 4.18 },
-  { date: "Feb 5", value: 4.21 },
+  { date: "Jan 23", value: 4.15 },
+  { date: "Jan 25", value: 4.18 },
+  { date: "Jan 26", value: 4.22 },
+  { date: "Jan 27", value: 4.19 },
+  { date: "Jan 28", value: 4.25 },
+  { date: "Jan 29", value: 4.28 },
+  { date: "Jan 30", value: 4.21 },
+  { date: "Jan 31", value: 4.24 },
+  { date: "Feb 1", value: 4.26 },
+  { date: "Feb 2", value: 4.23 },
+  { date: "Feb 3", value: 4.20 },
+  { date: "Feb 4", value: 4.22 },
+  { date: "Feb 5", value: 4.19 },
+  { date: "Feb 6", value: 4.21 },
+  { date: "Feb 7", value: 4.18 },
+  { date: "Feb 8", value: 4.21 },
 ];
 
 export const mockUser: User = {
@@ -235,9 +275,9 @@ export const mockUser: User = {
 };
 
 export const mockPrices: PriceData[] = [
-  { asset: "SUI", price: 2.45, change24h: 3.2, lastUpdated: "2026-02-05T23:30:00Z" },
-  { asset: "USDC", price: 1.0, change24h: 0.0, lastUpdated: "2026-02-05T23:30:00Z" },
-  { asset: "ETH", price: 2850.00, change24h: 1.8, lastUpdated: "2026-02-05T23:30:00Z" },
+  { asset: "SUI", price: 2.45, change24h: 3.2, lastUpdated: "2026-02-08T21:30:00Z" },
+  { asset: "USDC", price: 1.0, change24h: 0.0, lastUpdated: "2026-02-08T21:30:00Z" },
+  { asset: "ETH", price: 2850.00, change24h: 1.8, lastUpdated: "2026-02-08T21:30:00Z" },
 ];
 
 export const mockBorrowMarkets = [

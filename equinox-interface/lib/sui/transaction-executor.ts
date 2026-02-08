@@ -1,6 +1,8 @@
+
 import { Transaction } from "@mysten/sui/transactions";
 import { getSuiClient } from "@/lib/sui/client";
 import { isMockMode } from "@/lib/config";
+import { MockState } from "@/lib/sui/mock-state";
 import {
   buildCreateOrderTx,
   buildLockVestingTx,
@@ -10,6 +12,7 @@ import {
   buildRepayLoanTx,
   buildMintTokenTx,
   buildMatchOrdersTx,
+  buildLiquidateLoanTx,
 } from "@/lib/sui/transactions";
 
 export interface TransactionResult {
@@ -34,21 +37,10 @@ export function setSignAndExecuteCallback(
   signAndExecuteCallback = callback;
 }
 
+// Global execution function for REAL transactions
 async function executeTransaction(tx: Transaction, userAddress: string): Promise<TransactionResult> {
-  if (isMockMode()) {
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-    return {
-      success: true,
-      digest: `mock_${Date.now().toString(16)}`,
-      effects: {
-        status: { status: "success" },
-        gasUsed: {
-          computationCost: "1000000",
-          storageCost: "2000000",
-        },
-      },
-    };
-  }
+  // NOTE: We REMOVED the global mock check here. 
+  // If we are here, it means the caller explicitly wants to run a transaction (likely real or the caller decided to use real tx).
 
   if (!signAndExecuteCallback) {
     return {
@@ -76,6 +68,8 @@ async function executeTransaction(tx: Transaction, userAddress: string): Promise
   }
 }
 
+// --- Specific Executors with Mock Interception ---
+
 export async function executeCreateOrder(
   params: {
     type: "lend" | "borrow";
@@ -87,9 +81,33 @@ export async function executeCreateOrder(
     isHidden: boolean;
     coinObjectId?: string;
     collateralAmount?: number;
+    collaterals?: { asset: string; amount: number }[];
   },
   userAddress: string
 ): Promise<TransactionResult> {
+  if (isMockMode()) {
+    // Update local Mock State
+    MockState.addOrder({
+      id: `order-${Date.now()}`,
+      creator: userAddress,
+      type: params.type,
+      asset: params.asset,
+      amount: params.amount,
+      interestRate: params.interestRate,
+      ltv: params.ltv,
+      term: params.term,
+      status: "pending",
+      createdAt: new Date().toISOString(),
+      isHidden: params.isHidden,
+      fairnessScore: 85, // Default mock score
+      zkProofHash: params.isHidden ? `0x${Array(64).fill('a').join('')}` : undefined,
+      collaterals: params.collaterals,
+    });
+    
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    return { success: true, digest: `mock_${Date.now()}` };
+  }
+
   try {
     const tx = buildCreateOrderTx(params);
     return await executeTransaction(tx, userAddress);
@@ -108,6 +126,24 @@ export async function executeLockVesting(
   },
   userAddress: string
 ): Promise<TransactionResult> {
+  if (isMockMode()) {
+    const subsidy = params.lockDurationDays >= 365 ? 3.5 : 1.5;
+    MockState.addVestingPosition({
+      id: `vesting-${Date.now()}`,
+      amount: params.amount,
+      lockDate: new Date().toISOString(),
+      unlockDate: new Date(Date.now() + params.lockDurationDays * 86400000).toISOString(),
+      apy: 4.5 + subsidy,
+      subsidyRate: subsidy,
+      earnedRewards: 0,
+      status: "locked",
+      zkProofVerified: true,
+    });
+    
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    return { success: true, digest: `mock_${Date.now()}` };
+  }
+
   try {
     const tx = buildLockVestingTx(params);
     return await executeTransaction(tx, userAddress);
@@ -123,6 +159,12 @@ export async function executeUnlockVesting(
   vestingPositionId: string,
   userAddress: string
 ): Promise<TransactionResult> {
+  if (isMockMode()) {
+    MockState.unlockVestingPosition(vestingPositionId);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    return { success: true, digest: `mock_${Date.now()}` };
+  }
+
   try {
     const tx = buildUnlockVestingTx(vestingPositionId);
     return await executeTransaction(tx, userAddress);
@@ -142,6 +184,12 @@ export async function executeDeposit(
   },
   userAddress: string
 ): Promise<TransactionResult> {
+  if (isMockMode()) {
+    // Mock deposit logic if needed
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    return { success: true, digest: `mock_${Date.now()}` };
+  }
+
   try {
     const tx = buildDepositToVaultTx(params);
     return await executeTransaction(tx, userAddress);
@@ -164,6 +212,12 @@ export async function executeBorrow(
   },
   userAddress: string
 ): Promise<TransactionResult> {
+  if (isMockMode()) {
+    // Mock borrow logic if needed
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    return { success: true, digest: `mock_${Date.now()}` };
+  }
+
   try {
     const tx = buildCreateBorrowTx({
       ...params,
@@ -182,10 +236,17 @@ export async function executeBorrow(
 export async function executeRepay(
   loanId: string,
   coinObjectId: string,
+  asset: string,
   userAddress: string
 ): Promise<TransactionResult> {
+  if (isMockMode()) {
+    MockState.repayLoan(loanId);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    return { success: true, digest: `mock_${Date.now()}` };
+  }
+
   try {
-    const tx = buildRepayLoanTx(loanId, coinObjectId);
+    const tx = buildRepayLoanTx(loanId, coinObjectId, asset);
     return await executeTransaction(tx, userAddress);
   } catch (error) {
     return {
@@ -195,11 +256,37 @@ export async function executeRepay(
   }
 }
 
+export async function executeLiquidate(
+  loanId: string,
+  coinObjectId: string,
+  asset: string,
+  userAddress: string
+): Promise<TransactionResult> {
+  if (isMockMode()) {
+    MockState.liquidateLoan(loanId);
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    return { success: true, digest: `mock_${Date.now()}` };
+  }
+
+  try {
+    const tx = buildLiquidateLoanTx(loanId, coinObjectId, asset);
+    return await executeTransaction(tx, userAddress);
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to create liquidate transaction",
+    };
+  }
+}
+
 export async function executeMintToken(
   asset: string,
   amount: number,
   userAddress: string
 ): Promise<TransactionResult> {
+  // Faucet is ALWAYS real if possible, because user wants real faucet.
+  // We do NOT intercept with MockState here.
+  
   try {
     const tx = buildMintTokenTx(asset, amount);
     return await executeTransaction(tx, userAddress);
@@ -263,6 +350,12 @@ export async function executeMatchOrders(
   asset: string,
   userAddress: string
 ): Promise<TransactionResult> {
+  if (isMockMode()) {
+    MockState.matchOrders(lendOrderId, borrowOrderId);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    return { success: true, digest: `mock_${Date.now()}` };
+  }
+
   try {
     const tx = buildMatchOrdersTx(lendOrderId, borrowOrderId, asset);
     return await executeTransaction(tx, userAddress);

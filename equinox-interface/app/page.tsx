@@ -178,6 +178,7 @@ export default function DashboardPage() {
                       <th className="px-6 py-4 text-left text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Type</th>
                       <th className="px-6 py-4 text-left text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Asset</th>
                       <th className="px-6 py-4 text-left text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Amount</th>
+                      <th className="px-6 py-4 text-left text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Collateral</th>
                       <th className="px-6 py-4 text-left text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Rate</th>
                       <th className="px-6 py-4 text-left text-xs font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wider">Status</th>
                     </tr>
@@ -199,6 +200,21 @@ export default function DashboardPage() {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-[hsl(var(--foreground))]">
                           ${formatNumber(pos.amount)}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap text-xs text-[hsl(var(--muted-foreground))]">
+                          {pos.type === 'borrowing' ? (
+                             pos.collaterals ? (
+                                <div className="flex flex-col gap-1">
+                                    {pos.collaterals.map((c, i) => (
+                                        <span key={i}>{c.asset}: {formatNumber(c.amount)}</span>
+                                    ))}
+                                </div>
+                             ) : (
+                                <span>{pos.collateralAsset}: {formatNumber(pos.collateralAmount || 0)}</span>
+                             )
+                          ) : (
+                             <span>-</span>
+                          )}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-[hsl(var(--primary))] font-medium">
                           {pos.interestRate}%

@@ -65,6 +65,7 @@ export default function OrderbookPage() {
     isHidden: boolean;
     coinObjectId?: string;
     collateralAmount?: number;
+    collaterals?: { asset: string; amount: number }[];
   }) => {
     if (!isConnected || !address) {
       toast.error("Please connect your wallet first");
@@ -83,61 +84,21 @@ export default function OrderbookPage() {
 
       const zkProofHash = orderData.isHidden ? generateZkProofHash() : undefined;
 
-      const hasPackageId = Boolean(env.sui.orderbookPackageId);
-      
-      if (hasPackageId && !isMockMode()) {
-        const result = await executeCreateOrder(
-          {
-            type: orderType,
-            ...orderData,
-          },
-          address
-        );
+      // Always execute through the service - it handles Mock/Real switching internally
+      const result = await executeCreateOrder(
+        {
+          type: orderType,
+          ...orderData,
+        },
+        address
+      );
 
-        if (result.success) {
-          setLastTxDigest(result.digest || null);
-          
-          const newOrder: Order = {
-            id: result.digest || `order-${Date.now()}`,
-            type: orderType,
-            asset: orderData.asset,
-            amount: orderData.amount,
-            interestRate: orderData.interestRate,
-            ltv: orderData.ltv,
-            term: orderData.term,
-            status: "pending",
-            createdAt: new Date().toISOString(),
-            isHidden: orderData.isHidden,
-            zkProofHash,
-            fairnessScore: fairnessResult.score,
-          };
-
-          addOrder(newOrder);
-          setIsDialogOpen(false);
-
-          toast.success(
-            <div className="flex flex-col gap-1">
-              <span>Order created on blockchain!</span>
-              {result.digest && (
-                <a
-                  href={`https://suiscan.xyz/testnet/tx/${result.digest}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-blue-400 hover:underline flex items-center gap-1"
-                >
-                  View transaction <ExternalLink className="w-3 h-3" />
-                </a>
-              )}
-            </div>
-          );
-        } else {
-          toast.error(result.error || "Failed to create order on blockchain");
-        }
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-
+      if (result.success) {
+        setLastTxDigest(result.digest || null);
+        
+        // Optimistic UI update
         const newOrder: Order = {
-          id: `order-${Date.now()}`,
+          id: result.digest || `order-${Date.now()}`,
           type: orderType,
           asset: orderData.asset,
           amount: orderData.amount,
@@ -149,30 +110,32 @@ export default function OrderbookPage() {
           isHidden: orderData.isHidden,
           zkProofHash,
           fairnessScore: fairnessResult.score,
+          collaterals: orderData.collaterals,
         };
 
         addOrder(newOrder);
         setIsDialogOpen(false);
 
-        if (orderData.isHidden) {
-          toast.success(
-            <div className="flex flex-col gap-1">
-              <span>{orderType === "lend" ? "Lend" : "Borrow"} order placed with ZK privacy</span>
-              <span className="text-xs text-[hsl(var(--muted-foreground))]">
-                Fairness Score: {fairnessResult.score}/100
-              </span>
-            </div>
-          );
-        } else {
-          toast.success(
-            <div className="flex flex-col gap-1">
-              <span>{orderType === "lend" ? "Lend" : "Borrow"} order placed successfully</span>
-              <span className="text-xs text-[hsl(var(--muted-foreground))]">
-                Fairness Score: {fairnessResult.score}/100
-              </span>
-            </div>
-          );
-        }
+        toast.success(
+          <div className="flex flex-col gap-1">
+            <span>{orderType === "lend" ? "Lend" : "Borrow"} order placed successfully!</span>
+            {result.digest && (
+              <a
+                href={isMockMode() ? "#" : `https://suiscan.xyz/testnet/tx/${result.digest}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-400 hover:underline flex items-center gap-1"
+              >
+                {isMockMode() ? "View Tx" : "View transaction"} <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+            <span className="text-xs text-[hsl(var(--muted-foreground))]">
+              Fairness Score: {fairnessResult.score}/100
+            </span>
+          </div>
+        );
+      } else {
+        toast.error(result.error || "Failed to create order");
       }
     } catch (error) {
       console.error("Order submission error:", error);
@@ -232,12 +195,12 @@ export default function OrderbookPage() {
             <span>Orders matched successfully!</span>
             {result.digest && (
               <a
-                href={`https://suiscan.xyz/testnet/tx/${result.digest}`}
+                href={isMockMode() ? "#" : `https://suiscan.xyz/testnet/tx/${result.digest}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-xs text-blue-400 hover:underline flex items-center gap-1"
               >
-                View transaction <ExternalLink className="w-3 h-3" />
+                {isMockMode() ? "View Tx" : "View transaction"} <ExternalLink className="w-3 h-3" />
               </a>
             )}
           </div>
@@ -340,7 +303,7 @@ export default function OrderbookPage() {
 
             {lastTxDigest && (
               <a
-                href={`https://suiscan.xyz/testnet/tx/${lastTxDigest}`}
+                href={isMockMode() ? "#" : `https://suiscan.xyz/testnet/tx/${lastTxDigest}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sm text-[hsl(var(--primary))] hover:underline flex items-center gap-1 mt-2"

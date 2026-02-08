@@ -50,57 +50,20 @@ export default function VestingPage() {
       const subsidyRate = data.lockDuration >= 365 ? 3.5 : data.lockDuration >= 180 ? 2.5 : data.lockDuration >= 90 ? 1.5 : 0.5;
       const baseApy = 4.5;
 
-      const hasPackageId = Boolean(env.sui.vestingVaultPackageId);
+      // Always execute through the service - it handles Mock/Real switching internally
+      const result = await executeLockVesting(
+        {
+          amount: data.amount,
+          lockDurationDays: data.lockDuration,
+        },
+        address
+      );
 
-      if (hasPackageId && !isMockMode()) {
-        const result = await executeLockVesting(
-          {
-            amount: data.amount,
-            lockDurationDays: data.lockDuration,
-          },
-          address
-        );
-
-        if (result.success) {
-          setLastTxDigest(result.digest || null);
-
-          const newPosition: VestingPosition = {
-            id: result.digest || `vest-${Date.now()}`,
-            amount: data.amount,
-            lockDate: new Date().toISOString(),
-            unlockDate: new Date(Date.now() + data.lockDuration * 24 * 60 * 60 * 1000).toISOString(),
-            apy: baseApy + subsidyRate,
-            subsidyRate,
-            earnedRewards: 0,
-            status: "locked",
-            zkProofVerified: true,
-          };
-
-          addVestingPosition(newPosition);
-
-          toast.success(
-            <div className="flex flex-col gap-1">
-              <span>Locked {formatNumber(data.amount)} SUI for {data.lockDuration} days</span>
-              {result.digest && (
-                <a
-                  href={`https://suiscan.xyz/testnet/tx/${result.digest}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-blue-400 hover:underline flex items-center gap-1"
-                >
-                  View transaction <ExternalLink className="w-3 h-3" />
-                </a>
-              )}
-            </div>
-          );
-        } else {
-          toast.error(result.error || "Failed to lock tokens on blockchain");
-        }
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (result.success) {
+        setLastTxDigest(result.digest || null);
 
         const newPosition: VestingPosition = {
-          id: `vest-${Date.now()}`,
+          id: result.digest || `vest-${Date.now()}`,
           amount: data.amount,
           lockDate: new Date().toISOString(),
           unlockDate: new Date(Date.now() + data.lockDuration * 24 * 60 * 60 * 1000).toISOString(),
@@ -116,11 +79,23 @@ export default function VestingPage() {
         toast.success(
           <div className="flex flex-col gap-1">
             <span>Locked {formatNumber(data.amount)} SUI for {data.lockDuration} days</span>
-            <span className="text-xs text-[hsl(var(--muted-foreground))]">
+            {result.digest && (
+              <a
+                href={isMockMode() ? "#" : `https://suiscan.xyz/testnet/tx/${result.digest}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-400 hover:underline flex items-center gap-1"
+              >
+                  {isMockMode() ? "View Tx" : "View transaction"} <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+              <span className="text-xs text-[hsl(var(--muted-foreground))]">
               APY: {(baseApy + subsidyRate).toFixed(1)}% (includes {subsidyRate}% subsidy)
             </span>
           </div>
         );
+      } else {
+        toast.error(result.error || "Failed to lock tokens");
       }
     } catch (error) {
       console.error("Lock vesting error:", error);
@@ -139,37 +114,30 @@ export default function VestingPage() {
     setIsSubmitting(true);
 
     try {
-      const hasPackageId = Boolean(env.sui.vestingVaultPackageId);
+      // Always execute through the service
+      const result = await executeUnlockVesting(positionId, address);
 
-      if (hasPackageId && !isMockMode()) {
-        const result = await executeUnlockVesting(positionId, address);
-
-        if (result.success) {
-          setLastTxDigest(result.digest || null);
-          unlockVestingPosition(positionId);
-
-          toast.success(
-            <div className="flex flex-col gap-1">
-              <span>Tokens unlocked successfully</span>
-              {result.digest && (
-                <a
-                  href={`https://suiscan.xyz/testnet/tx/${result.digest}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-blue-400 hover:underline flex items-center gap-1"
-                >
-                  View transaction <ExternalLink className="w-3 h-3" />
-                </a>
-              )}
-            </div>
-          );
-        } else {
-          toast.error(result.error || "Failed to unlock tokens on blockchain");
-        }
-      } else {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+      if (result.success) {
+        setLastTxDigest(result.digest || null);
         unlockVestingPosition(positionId);
-        toast.success("Tokens unlocked successfully");
+
+        toast.success(
+          <div className="flex flex-col gap-1">
+            <span>Tokens unlocked successfully</span>
+            {result.digest && (
+              <a
+                href={isMockMode() ? "#" : `https://suiscan.xyz/testnet/tx/${result.digest}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-blue-400 hover:underline flex items-center gap-1"
+              >
+                {isMockMode() ? "View Tx" : "View transaction"} <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+          </div>
+        );
+      } else {
+        toast.error(result.error || "Failed to unlock tokens");
       }
     } catch (error) {
       console.error("Unlock vesting error:", error);

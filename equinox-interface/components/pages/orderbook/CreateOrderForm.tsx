@@ -29,6 +29,7 @@ interface CreateOrderFormProps {
     isHidden: boolean;
     coinObjectId?: string;
     collateralAmount?: number;
+    collaterals?: { asset: string; amount: number }[];
   }) => void;
   isSubmitting?: boolean;
 }
@@ -36,7 +37,12 @@ interface CreateOrderFormProps {
 export function CreateOrderForm({ type, onSubmit, isSubmitting = false }: CreateOrderFormProps) {
   const [asset, setAsset] = useState("USDC");
   const [amount, setAmount] = useState("");
-  const [collateralAmount, setCollateralAmount] = useState("");
+  const [collateralAmounts, setCollateralAmounts] = useState<{ [key: string]: string }>({
+    SUI: "",
+    ETH: "",
+    USDC: "",
+  });
+  
   const [interestRate, setInterestRate] = useState([4.5]);
   const [ltv, setLtv] = useState([70]);
   const [term, setTerm] = useState("30");
@@ -44,7 +50,11 @@ export function CreateOrderForm({ type, onSubmit, isSubmitting = false }: Create
   
   // Balance info
   const [assetBalance, setAssetBalance] = useState<number>(0);
-  const [collateralBalance, setCollateralBalance] = useState<number>(0);
+  const [balances, setBalances] = useState<{ [key: string]: number }>({
+    SUI: 0,
+    ETH: 0,
+    USDC: 0,
+  });
   const [coinObjectId, setCoinObjectId] = useState<string | undefined>(undefined);
 
   // Constants for MVP
@@ -71,9 +81,27 @@ export function CreateOrderForm({ type, onSubmit, isSubmitting = false }: Create
           setAssetBalance(total);
         }
 
-        // 2. Fetch Collateral Balance (Fixed to SUI for MVP)
-        const colBal = await suiClient.getBalance({ owner: account.address, coinType: "0x2::sui::SUI" });
-        setCollateralBalance(Number(colBal.totalBalance) / 1_000_000_000);
+        // 2. Fetch All Balances
+        const suiBal = await suiClient.getBalance({ owner: account.address, coinType: "0x2::sui::SUI" });
+        const newBalances = { ...balances };
+        newBalances.SUI = Number(suiBal.totalBalance) / 1_000_000_000;
+        
+        // Fetch USDC
+        try {
+            const usdcCoins = await suiClient.getCoins({ owner: account.address, coinType: getCoinType("USDC") });
+            newBalances.USDC = usdcCoins.data.reduce((acc, c) => acc + (Number(c.balance) / 1_000_000), 0);
+        } catch {}
+
+        // Fetch ETH
+        try {
+            const ethCoins = await suiClient.getCoins({ owner: account.address, coinType: getCoinType("ETH") });
+            newBalances.ETH = ethCoins.data.reduce((acc, c) => acc + (Number(c.balance) / 100_000_000), 0);
+        } catch {}
+
+        setBalances(newBalances);
+        
+        // Update asset balance based on selection
+        setAssetBalance(newBalances[asset as keyof typeof newBalances] || 0);
 
         // 3. Determine Coin Object ID
         // For Lend: We need Asset Coin Object
@@ -90,15 +118,8 @@ export function CreateOrderForm({ type, onSubmit, isSubmitting = false }: Create
             targetDecimals = getDecimalsForAsset(asset);
           }
         } else {
-          // Borrow: Need Collateral Object (SUI)
-          // SUI collateral is split from gas, so usually undefined if we use gas object
-          // But wait, transactions.ts might need explicit coin for collateral if we don't use gas
-          // Our buildBorrowOrderTx assumes SUI collateral is split from gas in buildCreateOrderTx?
-          // Let's check buildCreateOrderTx in transactions.ts:
-          // if (collateral === "SUI") { const [collateralCoin] = tx.splitCoins(tx.gas, [collateralAmount]); ... }
-          // So for SUI collateral, we don't need coinObjectId.
-          setCoinObjectId(undefined);
-          return;
+          // Borrow:
+          setCoinObjectId(undefined); 
         }
 
         if (targetCoinType) {
@@ -145,22 +166,48 @@ export function CreateOrderForm({ type, onSubmit, isSubmitting = false }: Create
         return;
       }
     } else {
-      // Borrow
-      if (!collateralAmount || parseFloat(collateralAmount) <= 0) {
-        toast.error("Please enter a valid collateral amount");
-        return;
+      // Borrow Check
+      // Calculate total collateral value
+      const prices = { SUI: 1.5, ETH: 3000, USDC: 1 }; // Mock prices
+      let totalCollateralValue = 0;
+      let hasCollateral = false;
+
+      for (const [coin, amt] of Object.entries(collateralAmounts)) {
+          const val = parseFloat(amt || "0");
+          if (val > 0) {
+              if (val > balances[coin]) {
+                  toast.error(`Insufficient ${coin} balance`);
+                  return;
+              }
+              // Prevent borrowing same asset as collateral (basic check)
+              if (coin === asset) {
+                  toast.error(`Cannot use ${coin} as collateral for ${coin} loan`);
+                  return;
+              }
+              totalCollateralValue += val * prices[coin as keyof typeof prices];
+              hasCollateral = true;
+          }
       }
-      const colAmountNum = parseFloat(collateralAmount);
-      if (colAmountNum > collateralBalance) {
-         toast.error(`Insufficient ${COLLATERAL_ASSET} collateral balance`);
-         return;
-      }
-      // For MVP Market (USDC/SUI), Asset must be USDC
-      if (asset === "SUI") {
-        toast.error("Cannot borrow SUI with SUI collateral. Please select USDC.");
-        return;
+
+      if (!hasCollateral) {
+          toast.error("Please add at least one collateral amount");
+          return;
       }
     }
+
+    // Proxy logic: Convert total collateral value to "SUI equivalent" for the backend MVP
+    // In reality, we would send a vector of coins or create a multi-collateral position.
+    // For this mock/hackathon interface, we treat the amount as the aggregated value.
+    const prices = { SUI: 1.5, ETH: 3000, USDC: 1 };
+    let totalCollateralValue = 0;
+    for (const [coin, amt] of Object.entries(collateralAmounts)) {
+        totalCollateralValue += parseFloat(amt || "0") * prices[coin as keyof typeof prices];
+    }
+    const equivalentSui = totalCollateralValue / prices.SUI; // Convert to SUI units for 'collateralAmount' prop compatibility
+
+    const collateralsList = Object.entries(collateralAmounts)
+        .filter(([_, amt]) => parseFloat(amt || "0") > 0)
+        .map(([asset, amt]) => ({ asset, amount: parseFloat(amt) }));
 
     onSubmit({
       asset,
@@ -170,9 +217,35 @@ export function CreateOrderForm({ type, onSubmit, isSubmitting = false }: Create
       term: parseInt(term),
       isHidden,
       coinObjectId,
-      collateralAmount: collateralAmount ? parseFloat(collateralAmount) : undefined,
+      collateralAmount: type === 'borrow' ? equivalentSui : undefined,
+      collaterals: type === 'borrow' ? collateralsList : undefined,
     });
   };
+
+  // Safe parsers for display
+  const borrowAmountVal = parseFloat(amount || "0");
+  const mockPrices = { SUI: 1.5, ETH: 3000, USDC: 1 };
+  let totalCollateralValue = 0;
+  let activeCollateralsCount = 0;
+  
+  if (type === "borrow") {
+      Object.entries(collateralAmounts).forEach(([coin, amt]) => {
+          const val = parseFloat(amt || "0");
+          if (val > 0) {
+              totalCollateralValue += val * mockPrices[coin as keyof typeof mockPrices];
+              activeCollateralsCount++;
+          }
+      });
+  }
+  
+  const impliedLTV = totalCollateralValue > 0 
+    ? ((borrowAmountVal * mockPrices[asset as keyof typeof mockPrices]) / totalCollateralValue) * 100 
+    : 0;
+
+  // Calculate "Borrow Power" / AI Match Score
+  // Base score 50. +10 per additional collateral type. +High Value bonus.
+  const borrowPower = Math.min(99, 50 + (activeCollateralsCount * 15) + (impliedLTV < 60 ? 15 : 0));
+  const borrowPowerColor = borrowPower > 80 ? "bg-[hsl(var(--success))]" : borrowPower > 60 ? "bg-[hsl(var(--warning))]" : "bg-[hsl(var(--destructive))]";
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
@@ -229,25 +302,53 @@ export function CreateOrderForm({ type, onSubmit, isSubmitting = false }: Create
       </div>
 
       {type === "borrow" && (
-        <div>
-          <label className="block text-sm font-medium text-[hsl(var(--foreground))] mb-2">
-            Collateral Amount ({COLLATERAL_ASSET})
-          </label>
-          <div className="relative">
-            <Input
-              type="number"
-              value={collateralAmount}
-              onChange={(e) => setCollateralAmount(e.target.value)}
-              placeholder="0.00"
-              className="pr-16 bg-[hsl(var(--secondary))] border-none"
-            />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-[hsl(var(--muted-foreground))]">
-              {COLLATERAL_ASSET}
-            </span>
+        <div className="space-y-4 border border-[hsl(var(--border))] rounded-xl p-4 bg-[hsl(var(--card))]/50">
+          <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-[hsl(var(--foreground))]">
+                Multi-Collateral
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[hsl(var(--muted-foreground))]">Borrow Power</span>
+                <div className="w-16 h-2 bg-[hsl(var(--secondary))] rounded-full overflow-hidden">
+                    <div 
+                        className={`h-full ${borrowPowerColor} transition-all duration-500`} 
+                        style={{ width: `${borrowPower}%` }}
+                    />
+                </div>
+              </div>
           </div>
-          <p className="text-xs text-[hsl(var(--muted-foreground))] mt-2 text-right">
-            Balance: {collateralBalance.toLocaleString()} {COLLATERAL_ASSET}
+          
+          <p className="text-xs text-[hsl(var(--muted-foreground))] mb-3">
+            Add multiple assets to increase your borrowing power and AI match score.
           </p>
+
+          {["SUI", "ETH", "USDC"].map((coin) => (
+             coin !== asset && (
+                <div key={coin} className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                        <span className="text-[hsl(var(--foreground))]">{coin}</span>
+                        <span className="text-[hsl(var(--muted-foreground))]">Bal: {balances[coin]?.toLocaleString() ?? 0}</span>
+                    </div>
+                    <div className="relative">
+                        <Input
+                            type="number"
+                            value={collateralAmounts[coin]}
+                            onChange={(e) => setCollateralAmounts(prev => ({ ...prev, [coin]: e.target.value }))}
+                            placeholder="0.00"
+                            className="pr-12 bg-[hsl(var(--secondary))] border-none h-9 text-sm"
+                        />
+                        <div className="absolute right-2 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full overflow-hidden">
+                             <Image src={`/token/${coin.toLowerCase()}.png`} alt={coin} fill className="object-cover" />
+                        </div>
+                    </div>
+                </div>
+             )
+          ))}
+          
+          <div className="pt-2 border-t border-[hsl(var(--border))] flex justify-between items-center text-sm">
+             <span className="text-[hsl(var(--muted-foreground))]">Total Value</span>
+             <span className="text-[hsl(var(--foreground))] font-medium">${totalCollateralValue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+          </div>
         </div>
       )}
 
@@ -287,12 +388,17 @@ export function CreateOrderForm({ type, onSubmit, isSubmitting = false }: Create
           step={5}
           className="cursor-pointer"
         />
-        {type === "borrow" && amount && collateralAmount && (
-           <p className="text-xs text-[hsl(var(--muted-foreground))] mt-2 text-right">
-             Implied LTV: {((parseFloat(amount) * 1 /* Assuming 1 USDC = 1 USD */) / (parseFloat(collateralAmount) * 1 /* Assuming 1 SUI = 1 USD for mock */) * 100).toFixed(2)}%
-             <br/>
-             <span className="text-[10px]">(Approximation based on mock prices)</span>
-           </p>
+        {type === "borrow" && (
+           <div className="mt-2 text-right space-y-1">
+             <p className="text-xs text-[hsl(var(--muted-foreground))]">
+               Implied LTV: <span className={impliedLTV > 80 ? "text-[hsl(var(--destructive))]" : "text-[hsl(var(--success))]"}>{impliedLTV.toFixed(2)}%</span>
+             </p>
+             {activeCollateralsCount > 0 && (
+                <p className="text-[10px] text-[hsl(var(--primary))] flex items-center justify-end gap-1">
+                    <Shield className="w-3 h-3" /> AI Enhanced Matching Active
+                </p>
+             )}
+           </div>
         )}
       </div>
 

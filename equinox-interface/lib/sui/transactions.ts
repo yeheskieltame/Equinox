@@ -386,7 +386,12 @@ export function buildUnlockVestingTx(vestingPositionId: string): Transaction {
   return tx;
 }
 
-export function buildRepayLoanTx(loanId: string, coinObjectId: string): Transaction {
+export function buildRepayLoanTx(
+  loanId: string, 
+  coinObjectId: string, 
+  asset: string, 
+  collateral: string = "SUI"
+): Transaction {
   const tx = new Transaction();
   const packageId = getPackageId();
 
@@ -397,6 +402,40 @@ export function buildRepayLoanTx(loanId: string, coinObjectId: string): Transact
   // Using loan module for repayment
   tx.moveCall({
     target: `${packageId}::loan::repay`,
+    typeArguments: [
+      getAssetCoinType(asset, packageId),
+      getAssetCoinType(collateral, packageId),
+    ],
+    arguments: [
+      tx.object(loanId),
+      tx.object(coinObjectId),
+      tx.object("0x6"), // Clock object
+    ],
+  });
+
+  return tx;
+}
+
+export function buildLiquidateLoanTx(
+  loanId: string, 
+  coinObjectId: string, 
+  asset: string, 
+  collateral: string = "SUI"
+): Transaction {
+  const tx = new Transaction();
+  const packageId = getPackageId();
+
+  if (!packageId) {
+    throw new Error("Package ID not configured");
+  }
+
+  // Using loan module for liquidation
+  tx.moveCall({
+    target: `${packageId}::loan::liquidate_defaulted_loan`,
+    typeArguments: [
+      getAssetCoinType(asset, packageId),
+      getAssetCoinType(collateral, packageId),
+    ],
     arguments: [
       tx.object(loanId),
       tx.object(coinObjectId),
