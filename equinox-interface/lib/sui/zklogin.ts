@@ -297,9 +297,19 @@ export async function fetchZkProof(
       throw new Error(`Prover service error: ${response.status}`);
     }
 
-    const proof = await response.json() as ZkProof;
-    setStoredZkProof(proof);
-    return proof;
+    const proof = await response.json() as Omit<ZkProof, 'addressSeed'>;
+    
+    // Calculate address seed as it's required for signing
+    // addressSeed is the big-endian bytes of the salt
+    const addressSeed = BigInt(salt).toString();
+    
+    const fullProof: ZkProof = {
+      ...proof,
+      addressSeed,
+    };
+
+    setStoredZkProof(fullProof);
+    return fullProof;
   } catch (error) {
     console.error("Failed to fetch ZK proof:", error);
     throw error;

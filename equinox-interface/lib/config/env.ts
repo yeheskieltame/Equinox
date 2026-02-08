@@ -8,6 +8,8 @@ export interface EnvConfig {
     packageId: string;
     registryId: string;
     vestingVaultId: string;
+    usdcAdminCapId?: string;
+    ethAdminCapId?: string;
     // Legacy aliases
     orderbookPackageId: string;
     loanObjectPackageId: string;
@@ -33,6 +35,9 @@ export const env: EnvConfig = {
     packageId: process.env.NEXT_PUBLIC_PACKAGE_ID || "",
     registryId: process.env.NEXT_PUBLIC_REGISTRY_ID || "",
     vestingVaultId: process.env.NEXT_PUBLIC_VESTING_VAULT_ID || "",
+    // New optional admin caps for faucet
+    usdcAdminCapId: process.env.NEXT_PUBLIC_USDC_ADMIN_CAP_ID || "",
+    ethAdminCapId: process.env.NEXT_PUBLIC_ETH_ADMIN_CAP_ID || "",
     // Legacy aliases for backward compatibility
     orderbookPackageId: process.env.NEXT_PUBLIC_ORDERBOOK_PACKAGE_ID || process.env.NEXT_PUBLIC_PACKAGE_ID || "",
     loanObjectPackageId: process.env.NEXT_PUBLIC_LOAN_OBJECT_PACKAGE_ID || process.env.NEXT_PUBLIC_PACKAGE_ID || "",

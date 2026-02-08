@@ -15,6 +15,7 @@ const navItems = [
   { href: "/borrow", label: "Borrow" },
   { href: "/orderbook", label: "Orderbook" },
   { href: "/vesting", label: "Vesting" },
+  { href: "/faucet", label: "Faucet" },
 ];
 
 export function Navbar() {

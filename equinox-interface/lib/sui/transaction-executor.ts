@@ -9,6 +9,7 @@ import {
   getStoredZkProof, 
   getStoredSalt,
   getStoredSession,
+  deriveZkLoginAddress,
   type ZkProof,
 } from "@/lib/sui/zklogin";
 import {
@@ -18,6 +19,7 @@ import {
   buildDepositToVaultTx,
   buildCreateBorrowTx,
   buildRepayLoanTx,
+  buildMintTokenTx,
 } from "@/lib/sui/transactions";
 
 export interface TransactionResult {
@@ -64,6 +66,15 @@ async function executeTransaction(tx: Transaction, userAddress: string): Promise
   }
 
   try {
+    const derivedAddress = await deriveZkLoginAddress(jwt, salt);
+    if (derivedAddress !== userAddress) {
+       console.error(`Address Mismatch! stored=${derivedAddress}, txSender=${userAddress}`);
+       return {
+         success: false,
+         error: "Session State Mismatch: Derived address does not match sender. Please log out and log in again."
+       };
+    }
+
     tx.setSender(userAddress);
     
     const { bytes, signature: userSignature } = await tx.sign({
@@ -72,10 +83,15 @@ async function executeTransaction(tx: Transaction, userAddress: string): Promise
     });
 
     if (proof) {
+      // Use the raw salt string as addressSeed to ensure it matches exactly what was used
+      // in jwtToAddress during address derivation.
+      // addressSeed: BigInt(salt).toString() caused mismatch if salt had leading zeros.
+      const addressSeed = salt;
+      
       const zkLoginSignature = getZkLoginSignature({
         inputs: {
           ...proof,
-          addressSeed: proof.addressSeed,
+          addressSeed,
         },
         maxEpoch: session.maxEpoch,
         userSignature,
@@ -227,6 +243,22 @@ export async function executeRepay(
     return {
       success: false,
       error: error instanceof Error ? error.message : "Failed to create repay transaction",
+    };
+  }
+}
+
+export async function executeMintToken(
+  asset: string,
+  amount: number,
+  userAddress: string
+): Promise<TransactionResult> {
+  try {
+    const tx = buildMintTokenTx(asset, amount);
+    return await executeTransaction(tx, userAddress);
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to create mint transaction",
     };
   }
 }

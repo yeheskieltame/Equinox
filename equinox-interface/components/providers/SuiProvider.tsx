@@ -209,6 +209,10 @@ function WalletContextProvider({ children }: { children: ReactNode }) {
         }
 
         try {
+          // Clear any existing session data to ensure a fresh login
+          // This prevents using stale ZK proofs with new ephemeral keys
+          clearZkLoginSession();
+
           const client = getSuiClient();
           const { epoch } = await client.getLatestSuiSystemState();
           const maxEpoch = Number(epoch) + 10;

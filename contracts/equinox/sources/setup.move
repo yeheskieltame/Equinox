@@ -21,7 +21,7 @@ module equinox::setup {
             b"Equinox Loan".to_string(),
             b"A lending position in the Equinox Protocol - Multi-collateral DeFi lending with DeepBook orderbook".to_string(),
             b"https://raw.githubusercontent.com/yeheskieltame/Equinox/refs/heads/main/equinox-interface/public/logo/Equinox.png".to_string(),
-            b"https://equinox.finance".to_string(),
+            b"https://equinox-fi.vercel.app".to_string(),
         ];
         let mut display = display::new_with_fields<Loan<sui::sui::SUI, sui::sui::SUI>>(
             &publisher, keys, values, ctx
@@ -40,7 +40,7 @@ module equinox::setup {
             b"Equinox Vested Position".to_string(),
             b"Locked tokens earning rewards - Use as collateral for priority lending".to_string(),
             b"https://raw.githubusercontent.com/yeheskieltame/Equinox/refs/heads/main/equinox-interface/public/logo/Equinox.png".to_string(),
-            b"https://equinox.finance".to_string(),
+            b"https://equinox-fi.vercel.app".to_string(),
         ];
         let mut display_v = display::new_with_fields<VestingPosition>(
             &publisher, keys_v, values_v, ctx

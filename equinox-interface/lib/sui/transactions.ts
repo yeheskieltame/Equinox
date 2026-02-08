@@ -70,9 +70,9 @@ export function buildCreateOrderTx(params: CreateOrderParams): Transaction {
 function getAssetTypeArg(asset: string, packageId: string): string[] {
   switch (asset) {
     case "USDC":
-      return [`${packageId}::mock_coins::MOCK_USDC`];
+      return [`${packageId}::mock_usdc::MOCK_USDC`];
     case "ETH":
-      return [`${packageId}::mock_coins::MOCK_ETH`];
+      return [`${packageId}::mock_eth::MOCK_ETH`];
     case "SUI":
     default:
       return ["0x2::sui::SUI"];
@@ -224,6 +224,54 @@ export function buildClaimVestingRewardsTx(vestingPositionId: string): Transacti
       tx.object(vestingPositionId),
     ],
   });
+
+  return tx;
+}
+
+// Build a transaction to mint mock tokens (Faucet)
+export function buildMintTokenTx(asset: string, amount: number): Transaction {
+  const tx = new Transaction();
+  const packageId = getPackageId();
+
+  if (!packageId) {
+    throw new Error("Package ID not configured");
+  }
+
+  // Adjust decimals based on asset
+  // USDC: 6 decimals, ETH: 8 decimals, SUI: 9 decimals
+  let decimals = 9;
+  if (asset === "USDC") decimals = 6;
+  if (asset === "ETH") decimals = 8;
+  
+  const amountMist = BigInt(Math.floor(amount * Math.pow(10, decimals)));
+
+  if (asset === "USDC") {
+    const capId = env.sui.usdcAdminCapId;
+    if (!capId) throw new Error("USDC Admin Cap ID not configured. Please redeploy contracts.");
+    
+    tx.moveCall({
+      target: `${packageId}::mock_usdc::faucet`,
+      arguments: [
+        tx.object(capId),
+        tx.pure.u64(amountMist),
+      ],
+    });
+  } else if (asset === "ETH") {
+    const capId = env.sui.ethAdminCapId;
+    if (!capId) throw new Error("ETH Admin Cap ID not configured. Please redeploy contracts.");
+
+    tx.moveCall({
+      target: `${packageId}::mock_eth::faucet`, // Corrected module name
+      arguments: [
+        tx.object(capId),
+        tx.pure.u64(amountMist),
+      ],
+    });
+  } else {
+    // Try generic faucet or fallback
+    console.warn("Using generic faucet for unknown asset");
+    // Fallback logic could be added here if needed, but for now we warn
+  }
 
   return tx;
 }
