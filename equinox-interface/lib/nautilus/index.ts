@@ -16,6 +16,9 @@
  */
 
 import { env } from "@/lib/config";
+import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
+import { fromHex, normalizeSuiAddress } from "@mysten/sui/utils";
+import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
 
 // Nautilus enclave configuration
 export interface EnclaveConfig {
@@ -72,14 +75,22 @@ export interface FairnessResponse {
  * The enclave would run the fairness algorithm and sign results with its private key.
  */
 class SimulatedNautilusEnclave {
-  // Simulated Ed25519 keypair (in production, this lives inside TEE)
-  // For demo, we use a deterministic "keypair" that produces consistent signatures
-  private simulatedPublicKey: Uint8Array;
+  private keypair: Ed25519Keypair;
   
-  constructor() {
-    // Demo public key (32 bytes)
-    // In production, this would be the actual enclave's Ed25519 public key
-    this.simulatedPublicKey = new Uint8Array(32).fill(0xAB);
+  constructor(privateKeyHex?: string) {
+    if (privateKeyHex) {
+      if (privateKeyHex.startsWith("suiprivkey")) {
+        const { secretKey } = decodeSuiPrivateKey(privateKeyHex);
+        this.keypair = Ed25519Keypair.fromSecretKey(secretKey);
+      } else {
+        // Use provided private key for real signatures
+        const cleanHex = privateKeyHex.startsWith("0x") ? privateKeyHex.slice(2) : privateKeyHex;
+        this.keypair = Ed25519Keypair.fromSecretKey(fromHex(cleanHex));
+      }
+    } else {
+      // Generate random ephemeral key for mock mode if no key provided
+      this.keypair = new Ed25519Keypair();
+    }
   }
 
   /**
@@ -91,7 +102,7 @@ class SimulatedNautilusEnclave {
    * 3. Vested collateral holders
    * 4. First-come-first-served for equal scores
    */
-  computeFairnessScore(request: FairnessRequest): FairnessResponse {
+  async computeFairnessScore(request: FairnessRequest): Promise<FairnessResponse> {
     const breakdown = {
       retailBoost: 0,
       diversityBonus: 0,
@@ -143,16 +154,15 @@ class SimulatedNautilusEnclave {
     const finalRate = (request.lendRate + request.borrowRate) / 2;
 
     // Create message to sign
+    // IMPORTANT: Must match Move contract serialization exactly
     const message = this.createMessage(
       request.lendOrderId,
       request.borrowOrderId,
-      score,
-      Date.now()
+      score
     );
 
-    // Create simulated signature
-    // In production, this would be ed25519_sign(privateKey, message)
-    const signature = this.simulateSignature(message);
+    // Sign with Ed25519
+    const signature = await this.keypair.sign(message);
 
     return {
       score,
@@ -171,59 +181,34 @@ class SimulatedNautilusEnclave {
   private createMessage(
     lendOrderId: string,
     borrowOrderId: string,
-    score: number,
-    timestamp: number
+    score: number
   ): Uint8Array {
-    // Convert order IDs to bytes (remove 0x prefix, convert hex to bytes)
-    const lendIdBytes = hexToBytes(lendOrderId.replace("0x", ""));
-    const borrowIdBytes = hexToBytes(borrowOrderId.replace("0x", ""));
+    // Convert order IDs to normalized 32-byte address format
+    const lendIdBytes = fromHex(normalizeSuiAddress(lendOrderId));
+    const borrowIdBytes = fromHex(normalizeSuiAddress(borrowOrderId));
     
-    // BCS encode the score as u64
+    // BCS encode the score as u64 (Little Endian)
     const scoreBytes = new Uint8Array(8);
     const view = new DataView(scoreBytes.buffer);
     view.setBigUint64(0, BigInt(score), true); // little-endian
 
-    // Timestamp as u64
-    const timestampBytes = new Uint8Array(8);
-    const tsView = new DataView(timestampBytes.buffer);
-    tsView.setBigUint64(0, BigInt(timestamp), true);
-
     // Concatenate all parts
+    // IMPORTANT: Must match Move contract serialization exactly
+    // Format: lendId (32 bytes) || borrowId (32 bytes) || score (8 bytes)
     const message = new Uint8Array(
-      lendIdBytes.length + borrowIdBytes.length + scoreBytes.length + timestampBytes.length
+      lendIdBytes.length + borrowIdBytes.length + scoreBytes.length
     );
     let offset = 0;
     message.set(lendIdBytes, offset); offset += lendIdBytes.length;
     message.set(borrowIdBytes, offset); offset += borrowIdBytes.length;
-    message.set(scoreBytes, offset); offset += scoreBytes.length;
-    message.set(timestampBytes, offset);
+    message.set(scoreBytes, offset);
 
+    // console.log("Nautilus Message Bytes:", Array.from(message));
     return message;
   }
 
-  /**
-   * Simulate Ed25519 signature
-   * In production, this would use actual Ed25519 signing inside the TEE
-   */
-  private simulateSignature(message: Uint8Array): Uint8Array {
-    // Create a deterministic "signature" based on message hash
-    // This is NOT cryptographically secure - just for demo visualization
-    const signature = new Uint8Array(64);
-    
-    // Simple hash simulation (in production: ed25519.sign(privateKey, message))
-    for (let i = 0; i < 64; i++) {
-      let hash = 0;
-      for (let j = 0; j < message.length; j++) {
-        hash = ((hash << 5) - hash + message[j]) | 0;
-      }
-      signature[i] = ((hash + i * 37) & 0xFF);
-    }
-
-    return signature;
-  }
-
   getPublicKey(): Uint8Array {
-    return this.simulatedPublicKey;
+    return this.keypair.getPublicKey().toSuiBytes();
   }
 }
 
@@ -246,7 +231,15 @@ let nautilusEnclave: SimulatedNautilusEnclave | null = null;
 
 function getEnclave(): SimulatedNautilusEnclave {
   if (!nautilusEnclave) {
-    nautilusEnclave = new SimulatedNautilusEnclave();
+    // Check for dev private key in environment
+    const devPrivateKey = process.env.NEXT_PUBLIC_NAUTILUS_DEV_PRIVATE_KEY;
+    nautilusEnclave = new SimulatedNautilusEnclave(devPrivateKey);
+    
+    if (devPrivateKey) {
+      console.log("Initialized Virtual Enclave with configured Private Key");
+    } else {
+      console.warn("Initialized Virtual Enclave with RANDOM ephemeral key (will not match on-chain unless registered)");
+    }
   }
   return nautilusEnclave;
 }
@@ -264,7 +257,7 @@ export async function computeFairnessScore(
   await new Promise(resolve => setTimeout(resolve, 500));
   
   const enclave = getEnclave();
-  return enclave.computeFairnessScore(request);
+  return await enclave.computeFairnessScore(request);
 }
 
 /**

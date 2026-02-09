@@ -431,35 +431,58 @@ export async function executeMatchOrders(
     // For hackathon demo without on-chain enclave registration,
     // we simulate the matching in mock mode.
     
-    // Check if enclave is registered on-chain
+    // 3. Build and execute on-chain match transaction
     const enclaveId = process.env.NEXT_PUBLIC_NAUTILUS_ENCLAVE_ID;
     
     if (!enclaveId) {
-      // No enclave registered - return demo result with computed score
-      console.log("No on-chain enclave registered. Returning computed fairness score.");
-      console.log("To enable on-chain matching:");
-      console.log("1. Deploy Nautilus enclave to AWS Nitro");
-      console.log("2. Register enclave PCRs and public key on-chain");
-      console.log("3. Set NEXT_PUBLIC_NAUTILUS_ENCLAVE_ID in .env");
-      
-      return {
-        success: false,
-        fairnessScore: fairnessResult.score,
-        finalRate: fairnessResult.finalRate,
-        error: `Fairness Score: ${fairnessResult.score}/100 (Rate: ${fairnessResult.finalRate.toFixed(2)}%). ` +
-               `On-chain matching requires enclave registration. See console for setup instructions.`,
-      };
+       throw new Error("Enclave ID is missing. Please set NEXT_PUBLIC_NAUTILUS_ENCLAVE_ID in .env.local");
     }
 
-    // 3. Build and execute on-chain match transaction
-    const tx = buildMatchOrdersWithNautilus(
-      lendOrderId,
-      borrowOrderId,
-      asset,
-      enclaveId,
-      fairnessResult.score,
-      formatSignatureForChain(fairnessResult.signature)
-    );
+    const tx = new Transaction();
+    // Import env properly
+    const { env } = await import("@/lib/config");
+    const packageId = env.sui.packageId;
+    // Default market ID (USDC/SUI)
+    const marketId = env.sui.marketId; 
+
+    if (!packageId) throw new Error("Package ID not configured");
+    if (!marketId) throw new Error("Market ID not configured");
+
+    // Helper to get asset type
+    const getAssetCoinType = (assetName: string): string => {
+        // This should match your Move contract types
+        const upper = assetName.toUpperCase();
+        if (upper === "SUI") return "0x2::sui::SUI";
+        if (upper === "USDC") return `${packageId}::mock_usdc::MOCK_USDC`;
+        if (upper === "ETH") return `${packageId}::mock_eth::MOCK_ETH`;
+        return `${packageId}::mock_usdc::MOCK_USDC`; // Default fallback
+    };
+
+    console.log("Building Match Order Tx:", {
+        marketId,
+        enclaveId,
+        lendOrderId,
+        borrowOrderId,
+        fairnessScore: fairnessResult.score,
+        proofLength: fairnessResult.signature.length
+    });
+
+    tx.moveCall({
+      target: `${packageId}::market::match_orders`,
+      typeArguments: [
+        getAssetCoinType(asset),
+        "0x2::sui::SUI", // Collateral type hardcoded to SUI for now based on context
+      ],
+      arguments: [
+        tx.object(marketId),
+        tx.object(enclaveId), // Enclave Shared Object
+        tx.pure.address(lendOrderId),
+        tx.pure.address(borrowOrderId),
+        tx.pure.u64(fairnessResult.score),
+        tx.pure.vector("u8", Array.from(fairnessResult.signature)),
+        tx.object("0x6"), // Clock object
+      ],
+    });
 
     const result = await executeTransaction(tx, userAddress);
     
@@ -478,56 +501,3 @@ export async function executeMatchOrders(
   }
 }
 
-/**
- * Build match orders transaction with Nautilus fairness proof
- */
-function buildMatchOrdersWithNautilus(
-  lendOrderId: string,
-  borrowOrderId: string,
-  asset: string,
-  enclaveId: string,
-  fairnessScore: number,
-  fairnessProof: number[],
-  collateral: string = "SUI"
-): Transaction {
-  const tx = new Transaction();
-  const { env } = require("@/lib/config");
-  const packageId = env.sui.packageId;
-  const marketId = env.sui.marketId;
-
-  if (!packageId) throw new Error("Package ID not configured");
-  if (!marketId) throw new Error("Market ID not configured");
-
-  // Get asset coin types
-  const getAssetCoinType = (assetName: string): string => {
-    switch (assetName.toUpperCase()) {
-      case "SUI":
-        return "0x2::sui::SUI";
-      case "USDC":
-        return `${packageId}::mock_usdc::MOCK_USDC`;
-      case "ETH":
-        return `${packageId}::mock_eth::MOCK_ETH`;
-      default:
-        return `${packageId}::mock_usdc::MOCK_USDC`;
-    }
-  };
-
-  tx.moveCall({
-    target: `${packageId}::market::match_orders`,
-    typeArguments: [
-      getAssetCoinType(asset),
-      getAssetCoinType(collateral),
-    ],
-    arguments: [
-      tx.object(marketId),
-      tx.object(enclaveId),
-      tx.pure.address(lendOrderId),
-      tx.pure.address(borrowOrderId),
-      tx.pure.u64(fairnessScore),
-      tx.pure.vector("u8", fairnessProof),
-      tx.object("0x6"), // Clock object
-    ],
-  });
-
-  return tx;
-}

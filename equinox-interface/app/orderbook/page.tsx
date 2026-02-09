@@ -163,10 +163,16 @@ export default function OrderbookPage() {
       }
 
       let match = null;
-      // Simple logic: find first overlap where borrow rate >= lend rate
+      // Simple logic: find first overlap where borrow rate >= lend rate AND amounts match exactly AND duration matches
+      // This is because current contract requires exact amount match (no partial fills)
       for (const lend of pendingLends) {
         for (const borrow of pendingBorrows) {
-          if (lend.asset === borrow.asset && borrow.interestRate >= lend.interestRate) {
+          if (
+            lend.asset === borrow.asset && 
+            borrow.interestRate >= lend.interestRate &&
+            Math.abs(borrow.amount - lend.amount) < 0.001 && // Handle float precision
+            lend.term >= borrow.term // Lender duration must cover borrower duration
+          ) {
             match = { lend, borrow };
             break;
           }
