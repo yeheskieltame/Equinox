@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, Fragment } from "react";
 import { Navbar } from "@/components/shared";
 import { useAppStore } from "@/lib/store";
 import { useWallet } from "@/components/providers";
@@ -129,9 +129,8 @@ export default function PositionsPage() {
                                 </tr>
                             ) : (
                                 positions.map((pos) => (
-                                    <>
+                                    <Fragment key={pos.id}>
                                         <tr 
-                                            key={pos.id} 
                                             onClick={() => toggleRow(pos.id)}
                                             className={cn(
                                                 "border-b border-[hsl(var(--border))] last:border-b-0 cursor-pointer transition-colors",
@@ -201,14 +200,18 @@ export default function PositionsPage() {
                                                                 Financials
                                                             </h4>
                                                             <div className="space-y-2">
-                                                                <div className="flex justify-between text-sm">
-                                                                    <span className="text-[hsl(var(--muted-foreground))]">Earned Interest</span>
-                                                                    <span className="text-[hsl(var(--success))] font-medium">+{formatNumber(pos.earnedInterest || 0)} {pos.asset}</span>
-                                                                </div>
-                                                                <div className="flex justify-between text-sm">
-                                                                    <span className="text-[hsl(var(--muted-foreground))]">Paid Interest</span>
-                                                                    <span className="text-[hsl(var(--destructive))] font-medium">-{formatNumber(pos.paidInterest || 0)} {pos.asset}</span>
-                                                                </div>
+                                                                {pos.type === 'lending' && (
+                                                                    <div className="flex justify-between text-sm">
+                                                                        <span className="text-[hsl(var(--muted-foreground))]">Earned Interest</span>
+                                                                        <span className="text-[hsl(var(--success))] font-medium">+{formatNumber(pos.earnedInterest || 0)} {pos.asset}</span>
+                                                                    </div>
+                                                                )}
+                                                                {pos.type === 'borrowing' && (
+                                                                    <div className="flex justify-between text-sm">
+                                                                        <span className="text-[hsl(var(--muted-foreground))]">Paid Interest</span>
+                                                                        <span className="text-[hsl(var(--destructive))] font-medium">-{formatNumber(pos.paidInterest || 0)} {pos.asset}</span>
+                                                                    </div>
+                                                                )}
                                                                 
                                                                 {pos.status === 'active' && (
                                                                   <div className="mt-4">
@@ -226,12 +229,21 @@ export default function PositionsPage() {
                                                                         Repay Loan
                                                                       </Button>
                                                                     ) : (
-                                                                      isOverdue(pos.endDate) ? (
+                                                                      <Button 
+                                                                        variant="outline"
+                                                                        disabled
+                                                                        className="w-full border-[hsl(var(--success))/20] text-[hsl(var(--success))]"
+                                                                      >
+                                                                        <Activity className="w-4 h-4 mr-2" />
+                                                                        Earning Interest
+                                                                      </Button>
+                                                                    )}
+                                                                    {(pos.type === 'lending' && isOverdue(pos.endDate)) && (
                                                                         <Button 
                                                                           onClick={() => handleLiquidate(pos.id, pos.asset)}
                                                                           disabled={!!processingId}
                                                                           variant="destructive"
-                                                                          className="w-full"
+                                                                          className="w-full mt-2"
                                                                         >
                                                                           {processingId === pos.id ? (
                                                                             <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
@@ -240,16 +252,6 @@ export default function PositionsPage() {
                                                                           )}
                                                                           Liquidate (Overdue)
                                                                         </Button>
-                                                                      ) : (
-                                                                        <Button 
-                                                                          variant="outline"
-                                                                          disabled
-                                                                          className="w-full border-[hsl(var(--success))/20] text-[hsl(var(--success))]"
-                                                                        >
-                                                                          <Activity className="w-4 h-4 mr-2" />
-                                                                          Earning Interest
-                                                                        </Button>
-                                                                      )
                                                                     )}
                                                                   </div>
                                                                 )}
@@ -262,38 +264,32 @@ export default function PositionsPage() {
                                                                 Risk & Collateral
                                                             </h4>
                                                             <div className="space-y-2">
-                                                                <div className="flex justify-between text-sm">
-                                                                    <span className="text-[hsl(var(--muted-foreground))]">LTV</span>
-                                                                    <span className="text-[hsl(var(--foreground))]">{(pos.ltv).toFixed(2)}%</span>
-                                                                </div>
-                                                                
-                                                                {/* Multi-Collateral Display */}
-                                                                {pos.collaterals && pos.collaterals.length > 0 ? (
-                                                                    <div className="space-y-1">
-                                                                        <span className="text-sm text-[hsl(var(--muted-foreground))] block mb-1">Collateral Assets</span>
-                                                                        {pos.collaterals.map((col, idx) => (
-                                                                            <div key={idx} className="flex justify-between text-sm pl-2 border-l-2 border-[hsl(var(--border))]">
-                                                                                <span className="text-[hsl(var(--muted-foreground))]">{col.asset}</span>
-                                                                                <span className="text-[hsl(var(--foreground))]">{formatNumber(col.amount)}</span>
-                                                                            </div>
-                                                                        ))}
+                                                                {pos.type === 'borrowing' && (
+                                                                    <div className="flex justify-between text-sm">
+                                                                        <span className="text-[hsl(var(--muted-foreground))]">LTV (Raw)</span>
+                                                                        <span className="text-[hsl(var(--foreground))] tooltip" title="Ratio of Loan Amount to Collateral Amount (Price agnostic)">
+                                                                            {(pos.ltv).toFixed(2)}%
+                                                                        </span>
                                                                     </div>
-                                                                ) : pos.collateralAsset ? (
+                                                                )}
+                                                                
+                                                                {/* Single Collateral Display (Contract is Single Collateral) */}
+                                                                {pos.collateralAsset && (
                                                                     <div className="flex justify-between text-sm">
                                                                         <span className="text-[hsl(var(--muted-foreground))]">Collateral</span>
                                                                         <span className="text-[hsl(var(--foreground))]">{formatNumber(pos.collateralAmount || 0)} {pos.collateralAsset}</span>
                                                                     </div>
-                                                                ) : null}
+                                                                )}
 
                                                                 <div className="flex justify-between text-sm items-center pt-2 mt-2 border-t border-[hsl(var(--border))]/50">
                                                                     <span className="text-[hsl(var(--muted-foreground))]">Contract ID</span>
                                                                     <a 
-                                                                      href={isMockMode() ? "#" : `https://suiscan.xyz/testnet/object/${pos.id}`}
+                                                                      href={isMockMode() ? "#" : `https://suiscan.xyz/testnet/object/${pos.id.split('-')[0]}`} // Handle suffix
                                                                       target="_blank" 
                                                                       rel="noopener noreferrer"
                                                                       className="font-mono text-xs text-[hsl(var(--primary))] hover:underline flex items-center gap-1"
                                                                     >
-                                                                      {pos.id.slice(0, 8)}...{pos.id.slice(-6)}
+                                                                      {pos.id.split('-')[0].slice(0, 8)}...{pos.id.split('-')[0].slice(-6)}
                                                                       <ExternalLink className="w-3 h-3" />
                                                                     </a>
                                                                 </div>
@@ -303,7 +299,7 @@ export default function PositionsPage() {
                                                 </td>
                                             </tr>
                                         )}
-                                    </>
+                                    </Fragment>
                                 ))
                             )}
                         </tbody>

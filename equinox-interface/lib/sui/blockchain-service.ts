@@ -211,107 +211,55 @@ export async function fetchBlockchainPositions(userAddress: string): Promise<Pos
 
     const allPositions: Position[] = [];
 
+    // 1. Fetch LENDING positions (Loans owned by user)
     for (const loanType of loanTypes) {
       try {
         const objects = await client.getOwnedObjects({
           owner: userAddress,
-          filter: {
-            StructType: loanType,
-          },
-          options: {
-            showContent: true,
-            showType: true,
-          },
+          filter: { StructType: loanType },
+          options: { showContent: true, showType: true },
         });
 
         for (const obj of objects.data) {
-          const content = obj.data?.content;
-          if (content?.dataType !== "moveObject") continue;
-          
-          const fields = content.fields as Record<string, unknown>;
-          const objType = content.type || "";
-          
-          // Loan struct fields from loan.move:
-          // - borrower: address
-          // - lender: address
-          // - amount: u64
-          // - interest_rate_bps: u64
-          // - start_timestamp: u64
-          // - duration: u64
-          // - collateral_balance: Balance<Collateral>
-          
-          // Determine if user is lender or borrower
-          const borrower = fields.borrower as string;
-          const lender = fields.lender as string;
-          const isLender = lender === userAddress;
-          
-          const amount = Number(fields.amount || 0);
-          const startTimestamp = Number(fields.start_timestamp || 0);
-          const duration = Number(fields.duration || 0);
-          const interestRateBps = Number(fields.interest_rate_bps || 0);
-          
-          // Parse collateral balance
-          const collateralBalanceField = fields.collateral_balance as Record<string, unknown> | undefined;
-          const collateralAmount = collateralBalanceField 
-            ? Number(collateralBalanceField.value || 0)
-            : 0;
-          
-          // Extract asset and collateral from type string
-          // e.g., "0x...::loan::Loan<0x...::mock_usdc::MOCK_USDC, 0x2::sui::SUI>"
-          let asset = "USDC";
-          let collateralAsset = "SUI";
-          if (objType.includes("mock_usdc")) {
-            asset = "USDC";
-          } else if (objType.includes("sui::SUI")) {
-            asset = "SUI";
-          }
-          if (objType.includes("mock_eth")) {
-            collateralAsset = objType.indexOf("mock_eth") > objType.indexOf("Loan") 
-              ? "ETH" : collateralAsset;
-          }
-          
-          // Determine decimals based on asset
-          const assetDecimals = asset === "USDC" ? 6 : asset === "ETH" ? 8 : 9;
-          const collateralDecimals = collateralAsset === "USDC" ? 6 : collateralAsset === "ETH" ? 8 : 9;
-          
-          // Calculate earned/paid interest based on time elapsed
-          const now = Date.now();
-          const elapsedMs = Math.max(0, now - startTimestamp);
-          const yearMs = 31536000000;
-          const principalNum = amount;
-          const interestAccrued = Math.floor((principalNum * interestRateBps * elapsedMs) / (10000 * yearMs));
-          
-          // Determine status
-          let status: Position["status"] = "active";
-          if (now > startTimestamp + duration) {
-            status = "active"; // Still active but overdue (can be liquidated)
-          }
-          
-          const position: Position = {
-            id: obj.data?.objectId || "",
-            type: isLender ? "lending" : "borrowing",
-            asset,
-            amount: amount / Math.pow(10, assetDecimals),
-            interestRate: interestRateBps / 100,
-            ltv: collateralAmount > 0 ? (amount / collateralAmount) * 100 : 0,
-            term: Math.floor(duration / (24 * 60 * 60 * 1000)), // Convert ms to days
-            startDate: new Date(startTimestamp).toISOString(),
-            endDate: new Date(startTimestamp + duration).toISOString(),
-            earnedInterest: isLender ? interestAccrued / Math.pow(10, assetDecimals) : 0,
-            paidInterest: !isLender ? interestAccrued / Math.pow(10, assetDecimals) : 0,
-            status,
-            collateralAsset: !isLender ? collateralAsset : undefined,
-            collateralAmount: !isLender ? collateralAmount / Math.pow(10, collateralDecimals) : undefined,
-            liquidationPrice: !isLender && collateralAmount > 0 
-              ? (amount * 1.1) / collateralAmount // 110% of current ratio
-              : undefined,
-          };
-          
-          allPositions.push(position);
+           const pos = parseLoanObject(obj.data, userAddress, "lending");
+           if (pos) allPositions.push(pos);
         }
       } catch (e) {
-        console.warn(`Error fetching loans of type ${loanType}:`, e);
+        console.warn(`Error fetching owned loans of type ${loanType}:`, e);
       }
+    }
+
+    // 2. Fetch BORROWING positions (Loans where user is borrower)
+    // Borrowers don't own the Loan object, so we find them via Events
+    try {
+        const events = await client.queryEvents({
+            query: { MoveEventType: `${packageId}::loan::LoanCreated` },
+            limit: 50, // Limit for MVP
+            order: "descending"
+        });
+
+        // Filter events where borrower is current user
+        const myLoanIds = events.data
+            .filter((e: any) => e.parsedJson?.borrower === userAddress)
+            .map((e: any) => e.parsedJson?.loan_id);
+
+        if (myLoanIds.length > 0) {
+            // Fetch latest object state for these loans
+            const loanObjects = await client.multiGetObjects({
+                ids: myLoanIds,
+                options: { showContent: true, showType: true }
+            });
+
+            for (const obj of loanObjects) {
+                if (obj.error) continue; // Skip deleted/error objects
+                const pos = parseLoanObject(obj.data, userAddress, "borrowing");
+                if (pos) {
+                    allPositions.push(pos);
+                }
+            }
+        }
+    } catch (e) {
+        console.warn("Error fetching borrowing events:", e);
     }
 
     return allPositions;
@@ -319,6 +267,109 @@ export async function fetchBlockchainPositions(userAddress: string): Promise<Pos
     console.error("Error fetching positions from blockchain:", error);
     return [];
   }
+}
+
+// Helper to parse Loan object into Position
+function parseLoanObject(data: any, userAddress: string, forceType?: "lending" | "borrowing"): Position | null {
+    if (!data || data.content?.dataType !== "moveObject") return null;
+
+    const content = data.content;
+    const fields = content.fields as Record<string, unknown>;
+    const objType = content.type || "";
+
+    const lender = fields.lender as string;
+    const borrower = fields.borrower as string;
+
+    // Determine type: use forceType if provided, else deduce
+    let type: "lending" | "borrowing";
+    if (forceType) {
+        type = forceType;
+    } else {
+        type = lender === userAddress ? "lending" : "borrowing";
+    }
+
+    // Validate ownership/participation
+    if (type === "lending" && lender !== userAddress) return null;
+    if (type === "borrowing" && borrower !== userAddress) return null;
+
+    const amount = Number(fields.amount || 0);
+    const startTimestamp = Number(fields.start_timestamp || 0);
+    const duration = Number(fields.duration || 0);
+    const interestRateBps = Number(fields.interest_rate_bps || 0);
+    
+    // Parse collateral balance
+    // JSON RPC might flatten Balance<T> to just the value string, or keep it as object with value field
+    let collateralRaw = 0;
+    if (typeof fields.collateral_balance === 'string' || typeof fields.collateral_balance === 'number') {
+        collateralRaw = Number(fields.collateral_balance);
+    } else if (typeof fields.collateral_balance === 'object' && fields.collateral_balance !== null) {
+        // Handle { value: "..." } structure
+        const val = (fields.collateral_balance as any).value;
+        collateralRaw = Number(val || 0);
+    }
+    
+    // Extract asset/collateral from type string
+    // Type format: Package::loan::Loan<AssetType, CollateralType>
+    let asset = "USDC";
+    let collateralAsset = "SUI";
+    
+    if (objType.includes("mock_usdc") && objType.indexOf("mock_usdc") < objType.lastIndexOf("::")) {
+        // Simple heuristic: First type arg is Asset
+        asset = "USDC"; 
+    } else if (objType.includes("sui::SUI") && objType.indexOf("sui::SUI") < objType.lastIndexOf("::")) {
+        asset = "SUI";
+    }
+
+    // Collateral is the second type arg
+    if (objType.includes("mock_eth")) collateralAsset = "ETH";
+    else if (objType.includes("sui::SUI") && asset !== "SUI") collateralAsset = "SUI";
+    else if (objType.includes("mock_usdc") && asset !== "USDC") collateralAsset = "USDC";
+
+    // Refined Asset Logic based on string parsing (MVP)
+    if (objType.includes("Loan<")) {
+        const types = objType.split("Loan<")[1].split(">")[0].split(",");
+        if (types.length >= 2) {
+            asset = types[0].includes("USDC") ? "USDC" : types[0].includes("ETH") ? "ETH" : "SUI";
+            collateralAsset = types[1].includes("USDC") ? "USDC" : types[1].includes("ETH") ? "ETH" : "SUI";
+        }
+    }
+    
+    const assetDecimals = asset === "USDC" ? 6 : asset === "ETH" ? 8 : 9;
+    const collateralDecimals = collateralAsset === "USDC" ? 6 : collateralAsset === "ETH" ? 8 : 9;
+    
+    const now = Date.now();
+    const elapsedMs = Math.max(0, now - startTimestamp);
+    const yearMs = 31536000000;
+    const interestAccrued = Math.floor((amount * interestRateBps * elapsedMs) / (10000 * yearMs));
+    
+    let status: Position["status"] = "active";
+    if (now > startTimestamp + duration) {
+        status = "active"; // Overdue
+    }
+    
+    // Unique ID for React Key: Append type suffix to handle self-loans (Lender=Borrower)
+    const uniqueId = `${data.objectId}-${type}`;
+
+    return {
+        id: uniqueId, // Modified ID for uniqueness
+        type,
+        asset,
+        amount: amount / Math.pow(10, assetDecimals),
+        interestRate: interestRateBps / 100,
+        ltv: collateralRaw > 0 ? (amount / collateralRaw) * 100 : 0,
+        term: Math.floor(duration / (24 * 60 * 60 * 1000)),
+        startDate: new Date(startTimestamp).toISOString(),
+        endDate: new Date(startTimestamp + duration).toISOString(),
+        earnedInterest: type === "lending" ? interestAccrued / Math.pow(10, assetDecimals) : 0,
+        paidInterest: type === "borrowing" ? interestAccrued / Math.pow(10, assetDecimals) : 0,
+        status,
+        collateralAsset: type === "borrowing" ? collateralAsset : undefined, // Only borrower cares about collateral details usually
+        collateralAmount: type === "borrowing" ? collateralRaw / Math.pow(10, collateralDecimals) : undefined,
+        liquidationPrice: type === "borrowing" && collateralRaw > 0 
+            ? (amount * 1.1) / collateralRaw 
+            : undefined,
+        // Add minimal collateral info for Lender too if needed
+    };
 }
 
 /**
